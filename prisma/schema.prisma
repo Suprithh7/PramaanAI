@@ -1,0 +1,194 @@
+// PRAMAAN — AICTE APH Workflow & Compliance Portal
+// SQLite note: Prisma does not support native enums on SQLite, so enum-bound
+// fields are stored as strings and validated at the application boundary
+// (lib/types.ts, lib/role-guard.ts, server actions).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String       @id @default(cuid())
+  name          String
+  email         String       @unique
+  role          String // INSTITUTION_ADMIN | REGIONAL_OFFICER | BUREAU_OFFICER | COMPLIANCE_HEAD | EVC_MEMBER
+  designation   String?
+  region        String? // NORTH | SOUTH | WEST | CENTRAL | EAST
+  institutionId String?
+  institution   Institution? @relation(fields: [institutionId], references: [id])
+  createdAt     DateTime     @default(now())
+
+  @@index([role])
+}
+
+model Institution {
+  id                    String   @id @default(cuid())
+  name                  String
+  code                  String   @unique
+  region                String // NORTH | SOUTH | WEST | CENTRAL | EAST
+  city                  String
+  state                 String
+  affiliatingUniversity String
+  totalLandAcres        Float
+  builtUpAreaSqM        Int
+  facultyCount          Int
+  studentIntake         Int
+  latitude              Float    @default(0)
+  longitude             Float    @default(0)
+  createdAt             DateTime @default(now())
+
+  applications Application[]
+  documents    ComplianceDocument[]
+  users        User[]
+  auditLogs    AuditLog[]
+
+  @@index([region])
+}
+
+model Application {
+  id                 String   @id @default(cuid())
+  referenceNo        String   @unique
+  institutionId      String
+  institution        Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  applicationType    String // NEW_INSTITUTE | EOA_EXTENSION | INTAKE_EXPANSION
+  programName        String
+  intakeRequested    Int?
+  status             String   @default("SUBMITTED")
+  processingPath     String // SCRUTINY_ONLY | SCRUTINY_EVC | EVC_SAC_SHC | EVC_ONLY
+  daysInCurrentStage Int      @default(0)
+  slaStatus          String   @default("ON_TRACK") // ON_TRACK | WARNING | BREACHED
+  stageEnteredAt     DateTime @default(now())
+  submittedAt        DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  assignedOfficerId  String?
+  decisionAt         DateTime?
+  approvalOrderNo    String?
+  remarks            String?
+
+  ruleChecks    ScrutinyRuleCheck[]
+  inspections   EVCInspection[]
+  deficiencies  DeficiencyTicket[]
+  escalations   EscalationTicket[]
+  auditLogs     AuditLog[]
+
+  @@index([status])
+  @@index([slaStatus])
+  @@index([institutionId])
+}
+
+model ScrutinyRuleCheck {
+  id             String      @id @default(cuid())
+  applicationId  String
+  application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  ruleCode       String
+  ruleName       String
+  requiredValue  String
+  submittedValue String
+  status         String // PASSED | DEFICIENCY_FLAGGED
+  officerRemarks String?
+  evaluatedAt    DateTime    @default(now())
+
+  @@unique([applicationId, ruleCode])
+  @@index([applicationId])
+}
+
+model EVCInspection {
+  id                    String      @id @default(cuid())
+  applicationId         String
+  application           Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  scheduledDate         DateTime
+  committeeLead         String
+  committeeRegion       String
+  committeeAffiliation  String
+  conflictCheckPassed   Boolean     @default(false)
+  conflictNotes         String?
+  siteReportStatus      String      @default("PENDING") // PENDING | COMPLETED | OVERDUE
+  geofenceVerified      Boolean     @default(false)
+  geofenceCoordinates   String?
+  geofenceDistanceM     Float?
+  reportSummary         String?
+  recommendation        String?
+  reportSubmittedAt     DateTime?
+  createdAt             DateTime    @default(now())
+
+  @@index([applicationId])
+}
+
+model DeficiencyTicket {
+  id                String      @id @default(cuid())
+  noticeNo          String?     @unique
+  applicationId     String
+  application       Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  raisedBy          String
+  deficiencyDetails String
+  complianceDeadline DateTime
+  status            String      @default("OPEN") // OPEN | RESUBMITTED | RESOLVED
+  resubmittedDocUrl String?
+  resubmittedAt     DateTime?
+  resolvedAt        DateTime?
+  createdAt         DateTime    @default(now())
+
+  @@index([applicationId])
+  @@index([status])
+}
+
+model ComplianceDocument {
+  id             String      @id @default(cuid())
+  institutionId  String
+  institution    Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  docType        String // LEASE_DEED | FIRE_SAFETY | BUILDING_PLAN | UNDERTAKING
+  documentRef    String
+  expiryDate     DateTime
+  status         String // VALID | EXPIRING_SOON | EXPIRED | PENDING_RENEWAL
+  notes          String?
+  lastVerifiedAt DateTime    @default(now())
+
+  @@unique([institutionId, docType])
+  @@index([status])
+}
+
+model EscalationTicket {
+  id             String      @id @default(cuid())
+  escalationNo   String      @unique
+  applicationId  String
+  application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  region         String
+  trigger        String
+  daysInStage    Int
+  penaltyPoints  Int         @default(5)
+  status         String      @default("OPEN") // OPEN | ACKNOWLEDGED | RESOLVED
+  assignedTo     String?
+  resolutionNote String?
+  createdAt      DateTime    @default(now())
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+
+  @@index([status])
+  @@index([region])
+}
+
+model AuditLog {
+  id            String       @id @default(cuid())
+  sequence      Int          @unique
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  institutionId String?
+  institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  performedBy   String
+  role          String
+  action        String
+  previousState String?
+  newState      String?
+  detail        String?
+  previousHash  String?
+  hashChecksum  String       @unique
+  timestamp     DateTime     @default(now())
+
+  @@index([applicationId])
+  @@index([timestamp])
+}
