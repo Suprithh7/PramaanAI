@@ -33,6 +33,8 @@ export async function getCase(id: string) {
       escalations: { orderBy: { createdAt: "desc" } },
       ruleChecks: { orderBy: { ruleCode: "asc" } },
       evidenceFiles: { orderBy: { createdAt: "desc" } },
+      filingDeclaration: true,
+      filingBrief: true,
       auditLogs: { orderBy: { sequence: "desc" }, take: 40 },
     },
   });

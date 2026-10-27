@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, Download, Filter, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowUpRight, Download, FilePlus2, Filter, Search, SlidersHorizontal, X } from "lucide-react";
 import {
   APPLICATION_TYPE_LABELS,
   PROCESSING_PATH_META,
@@ -130,9 +130,14 @@ export default async function ApplicationsPage({
         }
         actions={
           session.role === "INSTITUTION_ADMIN" ? (
-            <Link href="/compliance" className="btn btn-outline">
-              <Download size={11} /> Compliance renewals
-            </Link>
+            <>
+              <Link href="/compliance" className="btn btn-outline">
+                <Download size={11} /> Compliance renewals
+              </Link>
+              <Link href="/applications/new" className="btn btn-primary">
+                <FilePlus2 size={11} /> File new application
+              </Link>
+            </>
           ) : (
             <Link href="/scrutiny" className="btn btn-primary">
               <SlidersHorizontal size={11} /> Scrutiny desk

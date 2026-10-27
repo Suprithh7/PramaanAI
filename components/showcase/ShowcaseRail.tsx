@@ -24,10 +24,10 @@ export function ShowcaseRail({
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[8px] font-semibold uppercase tracking-wider2 text-brass-700">
-              Start here · one file, end to end
+              Statutory Reference Record
             </div>
             <div className="mt-0.5 font-serif text-[19px] font-semibold leading-tight text-navy-950">
-              Case Journey
+              Lifecycle Case Audit
             </div>
           </div>
           <ArrowUpRight
@@ -36,13 +36,13 @@ export function ShowcaseRail({
           />
         </div>
         <div className="relative mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-[8px] font-semibold uppercase tracking-label text-slate-500">
-          <span>Real stored records</span>
+          <span>Verified Ledger Trail</span>
           <span className="text-slate-300">|</span>
-          <span>Four authority roles</span>
+          <span>Multi-Tier Authority Hierarchy</span>
           <span className="text-slate-300">|</span>
-          <span>Ledger linked</span>
+          <span>Cryptographic Audit Proof</span>
           <span className="ml-auto text-brass-700 transition group-hover:text-brass-900">
-            Open walkthrough →
+            Inspect Audit →
           </span>
         </div>
       </Link>
@@ -101,10 +101,10 @@ export function ShowcaseRail({
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[8px] font-semibold uppercase tracking-wider2 text-brass-700">
-              Deterministic what-if engine
+              AI Statutory Compliance Engine
             </div>
             <div className="mt-0.5 font-serif text-[19px] font-semibold leading-tight text-navy-950">
-              APH Digital Twin
+              APH Norms &amp; Compliance Twin
             </div>
           </div>
           <ArrowUpRight
@@ -113,13 +113,13 @@ export function ShowcaseRail({
           />
         </div>
         <div className="relative mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-[8px] font-semibold uppercase tracking-label text-slate-500">
-          <span>7 APH controls</span>
+          <span>7 APH Norm Matrices</span>
           <span className="text-slate-300">|</span>
-          <span>Real rule engine</span>
+          <span>Zero-Write Simulation</span>
           <span className="text-slate-300">|</span>
-          <span className="text-emerald-700">Zero writes</span>
+          <span className="text-emerald-700">Gemini AI Guidance</span>
           <span className="ml-auto text-navy-700 transition group-hover:text-navy-900">
-            Open twin →
+            Open Simulator →
           </span>
         </div>
       </Link>

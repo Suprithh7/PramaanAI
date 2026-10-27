@@ -5,23 +5,43 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { evaluateAphRules, aphSummary, type AphRuleResult } from "@/lib/aph";
+import { generateFilingBrief, buildBriefContext } from "@/lib/ai";
+import {
+  aphInputFor,
+  aphSummary,
+  declarationToAphInput,
+  evaluateAphRules,
+  type AphDeclaration,
+  type AphRuleResult,
+} from "@/lib/aph";
 import { recordAudit, verifyAuditLedger } from "@/lib/audit";
 import { prisma } from "@/lib/db";
-import { MAX_EVIDENCE_BYTES, isPdf, processEvidencePdf, rehashStored, saveEvidenceFile } from "@/lib/evidence";
+import { MAX_EVIDENCE_BYTES, isPdf, processEvidencePdf, readEvidenceFile, rehashStored, saveEvidenceFile } from "@/lib/evidence";
+import {
+  analyzeDocumentWithGemini,
+  generateAicteDeficiencyNotice,
+  generateAicteRemediationRoadmap,
+  evaluateEvcInspectionWithGemini,
+} from "@/lib/gemini";
+import { extractText, getDocumentProxy } from "unpdf";
 import { EVIDENCE_TYPE_LABELS, isEvidenceType, type ExtractedField } from "@/lib/evidence-types";
 import { checkConflict, findEvcMember, geofenceResult, GEOFENCE_RADIUS_M } from "@/lib/evc";
 import { canDecide, canRaiseDeficiency, canRunAph, statusAfterSiteReport } from "@/lib/fsm";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, istYear } from "@/lib/format";
 import { getSession, ROLE_COOKIE, TENANT_COOKIE } from "@/lib/session";
 import { SLA_POLICY, liveDaysInStage, slaForDays } from "@/lib/sla";
 import {
+  APPLICATION_TYPE_LABELS,
+  APPLICATION_TYPES,
+  PROCESSING_PATH_META,
   REGION_META,
   ROLE_META,
   can,
   isRole,
   type ActionResult,
+  type ApplicationType,
   type Capability,
+  type ProcessingPath,
   type Region,
 } from "@/lib/types";
 
@@ -142,6 +162,262 @@ export async function switchTenantAction(tenantId: string) {
   refresh();
 }
 
+const PATH_BY_APPLICATION_TYPE: Record<ApplicationType, ProcessingPath> = {
+  NEW_INSTITUTE: "SCRUTINY_EVC",
+  INTAKE_EXPANSION: "SCRUTINY_EVC",
+  EOA_EXTENSION: "SCRUTINY_ONLY",
+};
+
+function isApplicationType(value: string): value is ApplicationType {
+  return (APPLICATION_TYPES as readonly string[]).includes(value);
+}
+
+async function allocateReferenceNo(region: string): Promise<string> {
+  const code = REGION_META[region as Region]?.code ?? "NR";
+  const prefix = `AICTE/APH/${istYear()}/${code}/`;
+  const existing = await prisma.application.findMany({
+    where: { referenceNo: { startsWith: prefix } },
+    select: { referenceNo: true },
+  });
+  const highest = existing.reduce((max, row) => {
+    const sequence = Number.parseInt(row.referenceNo.slice(prefix.length), 10);
+    return Number.isFinite(sequence) ? Math.max(max, sequence) : max;
+  }, 0);
+  return `${prefix}${String(highest + 1).padStart(4, "0")}`;
+}
+
+export async function fileApplicationAction(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const denied = requireCapability(session, "FILE_APPLICATION");
+  if (denied) return denied;
+  if (!session.tenant) {
+    return fail("Select an institution context before filing an application.");
+  }
+
+  const programName = field(formData, "programName");
+  const applicationType = field(formData, "applicationType");
+  const coveringNote = field(formData, "remarks");
+  const intakeInput = field(formData, "studentIntake");
+  const facultyInput = field(formData, "facultyCount");
+  const builtUpInput = field(formData, "builtUpAreaSqM");
+  const landInput = field(formData, "totalLandAcres");
+
+  if (programName.length < 3 || programName.length > 120) {
+    return fail("Enter a programme name between 3 and 120 characters.");
+  }
+  if (!isApplicationType(applicationType)) {
+    return fail("Choose a valid application type.");
+  }
+  if (coveringNote.length > 500) {
+    return fail("The covering note must be at most 500 characters.");
+  }
+
+  const studentIntake = Number(intakeInput);
+  if (!Number.isInteger(studentIntake) || studentIntake < 1 || studentIntake > 100_000) {
+    return fail("Declared student strength must be a whole number between 1 and 100,000.");
+  }
+  const facultyCount = Number(facultyInput);
+  if (!Number.isInteger(facultyCount) || facultyCount < 1 || facultyCount > 20_000) {
+    return fail("Declared full-time faculty must be a whole number between 1 and 20,000.");
+  }
+  const builtUpAreaSqM = Number(builtUpInput);
+  if (!Number.isInteger(builtUpAreaSqM) || builtUpAreaSqM < 1_000 || builtUpAreaSqM > 2_000_000) {
+    return fail("Declared built-up area must be between 1,000 and 2,000,000 sqm.");
+  }
+  const totalLandAcres = Number(landInput);
+  if (!Number.isFinite(totalLandAcres) || totalLandAcres < 0.1 || totalLandAcres > 10_000) {
+    return fail("Declared campus land must be between 0.1 and 10,000 acres.");
+  }
+
+  const dateInputs: Array<[key: keyof AphDeclaration, label: string]> = [
+    ["leaseExpiry", "Lease expiry"],
+    ["fireExpiry", "Fire safety certificate expiry"],
+    ["buildingExpiry", "Building plan validity"],
+    ["undertakingSignedOn", "Undertaking signed date"],
+  ];
+  const dates: Partial<Record<keyof AphDeclaration, Date>> = {};
+  for (const [key, label] of dateInputs) {
+    const parsed = dateFromInput(field(formData, key), true);
+    if (!parsed) return fail(`${label} must be a valid date.`);
+    const year = parsed.getFullYear();
+    if (year < 2000 || year > 2100) return fail(`${label} must fall between 2000 and 2100.`);
+    dates[key] = parsed;
+  }
+  if (dates.undertakingSignedOn!.getTime() > Date.now() + 86_400_000) {
+    return fail("The statutory undertaking cannot be dated in the future.");
+  }
+
+  const institution = await prisma.institution.findUnique({
+    where: { id: session.tenant.id },
+    select: { id: true, region: true, name: true },
+  });
+  if (!institution) return fail("Institution record not found.");
+
+  const declaration: AphDeclaration = {
+    studentIntake,
+    facultyCount,
+    builtUpAreaSqM,
+    totalLandAcres,
+    leaseExpiry: dates.leaseExpiry!,
+    fireExpiry: dates.fireExpiry!,
+    buildingExpiry: dates.buildingExpiry!,
+    undertakingSignedOn: dates.undertakingSignedOn!,
+  };
+  const aphInput = declarationToAphInput(applicationType, declaration, institution.name);
+  const results = evaluateAphRules(aphInput);
+  const summary = aphSummary(results);
+  const flaggedCodes = results
+    .filter((rule) => rule.status !== "PASSED")
+    .map((rule) => rule.ruleCode);
+
+  const referenceNo = await allocateReferenceNo(institution.region);
+  const processingPath = PATH_BY_APPLICATION_TYPE[applicationType];
+
+  const application = await prisma.$transaction(async (tx) => {
+    const created = await tx.application.create({
+      data: {
+        referenceNo,
+        institutionId: institution.id,
+        applicationType,
+        programName,
+        intakeRequested: studentIntake,
+        status: "SUBMITTED",
+        processingPath,
+        daysInCurrentStage: 0,
+        slaStatus: "ON_TRACK",
+        remarks:
+          coveringNote ||
+          `Filed through the institution portal for ${APPLICATION_TYPE_LABELS[applicationType]}. Awaiting scrutiny commencement.`,
+        filingDeclaration: {
+          create: {
+            studentIntake,
+            facultyCount,
+            builtUpAreaSqM,
+            totalLandAcres,
+            leaseExpiry: declaration.leaseExpiry as Date,
+            fireExpiry: declaration.fireExpiry as Date,
+            buildingExpiry: declaration.buildingExpiry as Date,
+            undertakingSignedOn: declaration.undertakingSignedOn as Date,
+          },
+        },
+      },
+    });
+    await persistRules(tx, created.id, results);
+    await recordAudit(
+      {
+        applicationId: created.id,
+        institutionId: institution.id,
+        performedBy: session.user.name,
+        role: session.role,
+        action: "APPLICATION_FILED",
+        previousState: null,
+        newState: "SUBMITTED",
+        detail: `${APPLICATION_TYPE_LABELS[applicationType]} · ${programName} · ${studentIntake.toLocaleString("en-IN")} students, ${facultyCount.toLocaleString("en-IN")} faculty, ${builtUpAreaSqM.toLocaleString("en-IN")} sqm declared · ${PROCESSING_PATH_META[processingPath].label} route · ${summary.total} APH rules evaluated at filing: ${summary.passed} passed, ${summary.flagged} flagged${flaggedCodes.length > 0 ? ` (${flaggedCodes.join(", ")})` : ""}.`,
+      },
+      tx,
+    );
+    return created;
+  });
+
+  const brief = await generateFilingBrief(
+    buildBriefContext({ ...application, institution }, aphInput, results),
+  );
+  await prisma.$transaction(async (tx) => {
+    await tx.filingBrief.create({
+      data: {
+        applicationId: application.id,
+        engine: brief.engine,
+        model: brief.model,
+        payload: JSON.stringify(brief.payload),
+      },
+    });
+    await recordAudit(
+      {
+        applicationId: application.id,
+        institutionId: institution.id,
+        performedBy: session.user.name,
+        role: session.role,
+        action: "FILING_BRIEF_GENERATED",
+        previousState: "SUBMITTED",
+        newState: "SUBMITTED",
+        detail: `${brief.engine === "LLM" ? `${brief.model} model` : "Grounded rule engine"} produced the ${brief.payload.riskLevel.toLowerCase()} filing brief at ${brief.payload.readinessScore}% readiness (${brief.payload.findings.length} finding(s)).`,
+      },
+      tx,
+    );
+  });
+
+  refresh();
+  redirect(`/applications/${application.id}?tab=aph`);
+}
+
+export async function regenerateFilingBriefAction(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const permitted = can(session.role, "RUN_APH") || can(session.role, "FILE_APPLICATION");
+  if (!permitted) {
+    return fail(
+      `Action not permitted for ${ROLE_META[session.role].label}. Required identity: an authorised scrutiny or filing role.`,
+    );
+  }
+
+  const applicationId = field(formData, "applicationId");
+  const application = await prisma.application.findUnique({
+    where: { id: applicationId },
+    include: {
+      institution: { include: { documents: true } },
+      filingDeclaration: true,
+    },
+  });
+  if (!application) return fail("Application not found.");
+  const scope = tenantError(session, application.institutionId);
+  if (scope) return fail(scope);
+
+  const aphInput = aphInputFor(application);
+  const results = evaluateAphRules(aphInput);
+  const brief = await generateFilingBrief(buildBriefContext(application, aphInput, results));
+
+  await prisma.$transaction(async (tx) => {
+    await tx.filingBrief.upsert({
+      where: { applicationId: application.id },
+      create: {
+        applicationId: application.id,
+        engine: brief.engine,
+        model: brief.model,
+        payload: JSON.stringify(brief.payload),
+      },
+      update: {
+        engine: brief.engine,
+        model: brief.model,
+        payload: JSON.stringify(brief.payload),
+        generatedAt: new Date(),
+      },
+    });
+    await recordAudit(
+      {
+        applicationId: application.id,
+        institutionId: application.institutionId,
+        performedBy: session.user.name,
+        role: session.role,
+        action: "FILING_BRIEF_GENERATED",
+        previousState: application.status,
+        newState: application.status,
+        detail: `Brief regenerated from the live APH matrix by ${brief.engine === "LLM" ? `${brief.model} model` : "the grounded rule engine"}: ${brief.payload.riskLevel.toLowerCase()} risk, ${brief.payload.readinessScore}% readiness, ${brief.payload.findings.length} finding(s).`,
+      },
+      tx,
+    );
+  });
+
+  refresh();
+  return ok(
+    `Brief regenerated from the live APH matrix: ${brief.payload.riskLevel.toLowerCase()} risk at ${brief.payload.readinessScore}% readiness.`,
+  );
+}
+
 export async function commenceScrutinyAction(
   _prev: ActionResult | null,
   formData: FormData,
@@ -198,16 +474,15 @@ export async function runAphAction(
   const applicationId = field(formData, "applicationId");
   const application = await prisma.application.findUnique({
     where: { id: applicationId },
-    include: { institution: { include: { documents: true } } },
+    include: {
+      institution: { include: { documents: true } },
+      filingDeclaration: true,
+    },
   });
   if (!application) return fail("Application not found.");
   if (!canRunAph(application.status)) return fail("This application is closed.");
 
-  const results = evaluateAphRules({
-    applicationType: application.applicationType,
-    institution: application.institution,
-    documents: application.institution.documents,
-  });
+  const results = evaluateAphRules(aphInputFor(application));
   const summary = aphSummary(results);
   const failed = results.filter((rule) => rule.status !== "PASSED");
 
@@ -251,18 +526,17 @@ export async function clearScrutinyAction(
   const applicationId = field(formData, "applicationId");
   const application = await prisma.application.findUnique({
     where: { id: applicationId },
-    include: { institution: { include: { documents: true } } },
+    include: {
+      institution: { include: { documents: true } },
+      filingDeclaration: true,
+    },
   });
   if (!application) return fail("Application not found.");
   if (application.status !== "UNDER_SCRUTINY") {
     return fail("Only cases under active scrutiny can be cleared.");
   }
 
-  const results = evaluateAphRules({
-    applicationType: application.applicationType,
-    institution: application.institution,
-    documents: application.institution.documents,
-  });
+  const results = evaluateAphRules(aphInputFor(application));
   const summary = aphSummary(results);
   if (summary.flagged > 0) {
     return fail(
@@ -316,6 +590,7 @@ export async function raiseDeficiencyAction(
     where: { id: applicationId },
     include: {
       institution: { include: { documents: true } },
+      filingDeclaration: true,
       deficiencies: { orderBy: { createdAt: "desc" } },
     },
   });
@@ -335,11 +610,7 @@ export async function raiseDeficiencyAction(
     return fail("The deficiency statement must be at least 30 characters for a formal notice.");
   }
 
-  const live = evaluateAphRules({
-    applicationType: application.applicationType,
-    institution: application.institution,
-    documents: application.institution.documents,
-  });
+  const live = evaluateAphRules(aphInputFor(application));
   const failedCodes = live
     .filter((rule) => rule.status !== "PASSED")
     .map((rule) => rule.ruleCode);
@@ -407,7 +678,11 @@ export async function resubmitDeficiencyAction(
 
   const ticket = await prisma.deficiencyTicket.findUnique({
     where: { id: ticketId },
-    include: { application: { include: { institution: true } } },
+    include: {
+      application: {
+        include: { institution: true, filingDeclaration: true },
+      },
+    },
   });
   if (!ticket) return fail("Deficiency ticket not found.");
   const scope = tenantError(session, ticket.application.institutionId);
@@ -432,26 +707,38 @@ export async function resubmitDeficiencyAction(
     }
   }
 
+  const declaration = ticket.application.filingDeclaration;
+  const currentBuiltUp = declaration?.builtUpAreaSqM ?? ticket.application.institution.builtUpAreaSqM;
+  const currentFaculty = declaration?.facultyCount ?? ticket.application.institution.facultyCount;
   const institutionUpdates: Prisma.InstitutionUpdateInput = {};
+  const declarationUpdates: Prisma.FilingDeclarationUpdateInput = {};
   const changes: string[] = [];
-  if (revisedBuiltUp && revisedBuiltUp !== ticket.application.institution.builtUpAreaSqM) {
-    institutionUpdates.builtUpAreaSqM = Math.round(revisedBuiltUp);
+  if (revisedBuiltUp && revisedBuiltUp !== currentBuiltUp) {
+    const nextBuiltUp = Math.round(revisedBuiltUp);
+    if (declaration) declarationUpdates.builtUpAreaSqM = nextBuiltUp;
+    else institutionUpdates.builtUpAreaSqM = nextBuiltUp;
     changes.push(
-      `built-up area ${ticket.application.institution.builtUpAreaSqM.toLocaleString("en-IN")} → ${Math.round(revisedBuiltUp).toLocaleString("en-IN")} sqm`,
+      `built-up area ${currentBuiltUp.toLocaleString("en-IN")} → ${nextBuiltUp.toLocaleString("en-IN")} sqm`,
     );
   }
-  if (revisedFaculty && revisedFaculty !== ticket.application.institution.facultyCount) {
-    institutionUpdates.facultyCount = revisedFaculty;
-    changes.push(
-      `faculty ${ticket.application.institution.facultyCount} → ${revisedFaculty}`,
-    );
+  if (revisedFaculty && revisedFaculty !== currentFaculty) {
+    if (declaration) declarationUpdates.facultyCount = revisedFaculty;
+    else institutionUpdates.facultyCount = revisedFaculty;
+    changes.push(`faculty ${currentFaculty} → ${revisedFaculty}`);
   }
+  const profileLabel = declaration ? "Filed declaration" : "Statutory profile";
 
   await prisma.$transaction(async (tx) => {
     if (Object.keys(institutionUpdates).length > 0) {
       await tx.institution.update({
         where: { id: ticket.application.institutionId },
         data: institutionUpdates,
+      });
+    }
+    if (Object.keys(declarationUpdates).length > 0) {
+      await tx.filingDeclaration.update({
+        where: { applicationId: ticket.applicationId },
+        data: declarationUpdates,
       });
     }
     await tx.deficiencyTicket.update({
@@ -481,7 +768,7 @@ export async function resubmitDeficiencyAction(
         action: "DEFICIENCY_RESUBMITTED",
         previousState: "DEFICIENCY_REVERTED",
         newState: "RE_SCRUTINY",
-        detail: `Evidence filed against ${ticket.noticeNo ?? "notice"}: ${evidenceUrl}.${changes.length > 0 ? ` Statutory profile corrected: ${changes.join("; ")}.` : ""}${note ? ` Note: ${note}` : ""}`,
+        detail: `Evidence filed against ${ticket.noticeNo ?? "notice"}: ${evidenceUrl}.${changes.length > 0 ? ` ${profileLabel} corrected: ${changes.join("; ")}.` : ""}${note ? ` Note: ${note}` : ""}`,
       },
       tx,
     );
@@ -503,7 +790,12 @@ export async function acceptResubmissionAction(
   const ticket = await prisma.deficiencyTicket.findUnique({
     where: { id: ticketId },
     include: {
-      application: { include: { institution: { include: { documents: true } } } },
+      application: {
+        include: {
+          institution: { include: { documents: true } },
+          filingDeclaration: true,
+        },
+      },
     },
   });
   if (!ticket) return fail("Deficiency ticket not found.");
@@ -514,11 +806,7 @@ export async function acceptResubmissionAction(
     return fail("The application is not in re-scrutiny.");
   }
 
-  const results = evaluateAphRules({
-    applicationType: ticket.application.applicationType,
-    institution: ticket.application.institution,
-    documents: ticket.application.institution.documents,
-  });
+  const results = evaluateAphRules(aphInputFor(ticket.application));
   const summary = aphSummary(results);
   if (summary.flagged > 0) {
     const codes = results
@@ -1383,4 +1671,219 @@ export async function applyExtractionAction(
 
   refresh();
   return ok(`Profile updated from ${record.fileName}: ${applied.join(", ")}.`);
+}
+
+
+export async function runGeminiEvidenceAuditAction(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const denied = requireCapability(session, "VERIFY_EVIDENCE");
+  if (denied) return denied;
+
+  const evidenceId = field(formData, "evidenceId");
+  const record = await prisma.evidenceFile.findUnique({
+    where: { id: evidenceId },
+    include: { institution: true, application: true },
+  });
+  if (!record) return fail("Evidence record not found.");
+  const scope = tenantError(session, record.institutionId);
+  if (scope) return fail(scope);
+
+  let rawText = "";
+  try {
+    const bytes = await readEvidenceFile(record.storagePath);
+    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    const extracted = (await extractText(pdf, { mergePages: true })) as { text: string | string[] };
+    rawText = Array.isArray(extracted.text) ? extracted.text.join("\n") : extracted.text;
+  } catch (err) {
+    return fail(`Could not extract text layer for forensic AI analysis: ${err instanceof Error ? err.message : "PDF error"}`);
+  }
+
+  const analysis = await analyzeDocumentWithGemini({
+    fileName: record.fileName,
+    docType: record.docType,
+    rawText: rawText || record.fileName,
+    institutionName: record.institution.name,
+  });
+
+  if (!analysis) {
+    return fail("Gemini Forensic Engine timeout or parse error. Please retry.");
+  }
+
+  let existingExtracted: Record<string, unknown> = {};
+  try {
+    existingExtracted = JSON.parse(record.extracted);
+  } catch {
+    existingExtracted = {};
+  }
+
+  const updatedExtracted = {
+    ...existingExtracted,
+    geminiAudit: analysis,
+    auditedAt: new Date().toISOString(),
+  };
+
+  const newIntegrity =
+    analysis.forensicAudit.integrityRating === "VERIFIED"
+      ? "VERIFIED"
+      : analysis.forensicAudit.integrityRating === "TAMPER_SUSPECTED"
+        ? "TAMPERED"
+        : record.integrity;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.evidenceFile.update({
+      where: { id: record.id },
+      data: {
+        extracted: JSON.stringify(updatedExtracted),
+        integrity: newIntegrity,
+        reviewedBy: `Gemini Forensic AI (supervised by ${session.user.name})`,
+        reviewedAt: new Date(),
+      },
+    });
+
+    await recordAudit(
+      {
+        applicationId: record.applicationId,
+        institutionId: record.institutionId,
+        performedBy: session.user.name,
+        role: session.role,
+        action: "AI_FORENSIC_SCRUTINY_EXECUTED",
+        previousState: record.integrity,
+        newState: newIntegrity,
+        detail: `Gemini 3 Flash forensic audit for ${record.fileName}: Authenticity Score ${analysis.forensicAudit.authenticityScore}/100 · Rating: ${analysis.forensicAudit.integrityRating} · Seal: ${analysis.forensicAudit.sealDetected ? "YES" : "NO"} · Signature: ${analysis.forensicAudit.signatureDetected ? "YES" : "NO"} · Flags: ${analysis.forensicAudit.tamperFlags.join(", ") || "None"} · Summary: ${analysis.forensicAudit.officialSummary.slice(0, 200)}`,
+      },
+      tx,
+    );
+  });
+
+  refresh();
+  return ok(
+    `Gemini Forensic Scrutiny complete: Authenticity ${analysis.forensicAudit.authenticityScore}% (${analysis.forensicAudit.integrityRating}). ${analysis.forensicAudit.officialSummary}`,
+  );
+}
+
+export async function draftAiDeficiencyAction(
+  applicationId: string,
+): Promise<{ ok: boolean; noticeText?: string; clausesCited?: string[]; error?: string }> {
+  const session = await getSession();
+  if (!can(session.role, "RAISE_DEFICIENCY")) {
+    return { ok: false, error: "Unauthorized: only Regional and Bureau Officers can draft deficiency notices." };
+  }
+
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    include: {
+      institution: { include: { documents: true } },
+      filingDeclaration: true,
+    },
+  });
+  if (!app) return { ok: false, error: "Application not found." };
+
+  const aphInput = aphInputFor(app);
+  const liveRules = evaluateAphRules(aphInput);
+  const flagged = liveRules.filter((r) => r.status !== "PASSED");
+
+  if (flagged.length === 0) {
+    return {
+      ok: false,
+      error: "All live APH rules are currently satisfied. No deficiency notice is required.",
+    };
+  }
+
+  const declaration = app.filingDeclaration;
+  const admissions = declaration?.studentIntake ?? app.institution.studentIntake;
+  const facultyCount = declaration?.facultyCount ?? app.institution.facultyCount;
+
+  const result = await generateAicteDeficiencyNotice({
+    referenceNo: app.referenceNo,
+    institutionName: app.institution.name,
+    programName: app.programName,
+    flaggedRules: flagged,
+    admissions,
+    facultyCount,
+  });
+
+  if (!result) {
+    return { ok: false, error: "Gemini failed to generate draft notice." };
+  }
+
+  return {
+    ok: true,
+    noticeText: result.noticeText,
+    clausesCited: result.clausesCited,
+  };
+}
+
+export async function generateAiRemediationAction(
+  applicationId: string,
+): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    include: {
+      institution: { include: { documents: true } },
+      filingDeclaration: true,
+    },
+  });
+  if (!app) return { ok: false, error: "Application not found." };
+
+  const aphInput = aphInputFor(app);
+  const liveRules = evaluateAphRules(aphInput);
+  const flagged = liveRules.filter((r) => r.status !== "PASSED");
+
+  const declaration = app.filingDeclaration;
+  const admissions = declaration?.studentIntake ?? app.institution.studentIntake;
+  const facultyCount = declaration?.facultyCount ?? app.institution.facultyCount;
+  const builtUpArea = declaration?.builtUpAreaSqM ?? app.institution.builtUpAreaSqM;
+
+  const result = await generateAicteRemediationRoadmap({
+    referenceNo: app.referenceNo,
+    institutionName: app.institution.name,
+    programName: app.programName,
+    flaggedRules: flagged,
+    admissions,
+    facultyCount,
+    builtUpArea,
+  });
+
+  if (!result) {
+    return { ok: false, error: "Gemini failed to generate remediation roadmap." };
+  }
+
+  return { ok: true, data: result };
+}
+
+export async function evaluateAiInspectionAction(
+  inspectionId: string,
+  siteObservations: string,
+): Promise<{ ok: boolean; evaluation?: unknown; error?: string }> {
+  const inspection = await prisma.eVCInspection.findUnique({
+    where: { id: inspectionId },
+    include: {
+      application: { include: { institution: true, filingDeclaration: true } },
+    },
+  });
+  if (!inspection) return { ok: false, error: "Inspection record not found." };
+
+  const declaration = inspection.application.filingDeclaration;
+  const intake = declaration?.studentIntake ?? inspection.application.institution.studentIntake;
+  const faculty = declaration?.facultyCount ?? inspection.application.institution.facultyCount;
+  const builtUp = declaration?.builtUpAreaSqM ?? inspection.application.institution.builtUpAreaSqM;
+
+  const evaluation = await evaluateEvcInspectionWithGemini({
+    committeeLead: inspection.committeeLead,
+    institutionName: inspection.application.institution.name,
+    declaredIntake: intake,
+    declaredFaculty: faculty,
+    declaredBuiltUpSqM: builtUp,
+    geofenceDistanceM: inspection.geofenceDistanceM ?? 0,
+    siteObservations,
+  });
+
+  if (!evaluation) {
+    return { ok: false, error: "Gemini failed to evaluate site observations." };
+  }
+
+  return { ok: true, evaluation };
 }

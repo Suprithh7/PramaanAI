@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Download, ShieldCheck } from "lucide-react";
 import { Emblem } from "@/components/Emblem";
 import { PrintButton } from "@/components/case/PrintButton";
-import { evaluateAphRules } from "@/lib/aph";
+import { aphInputFor, evaluateAphRules } from "@/lib/aph";
 import { fmtDate, truncateHash } from "@/lib/format";
 import { getCase } from "@/lib/queries";
 import { getSession } from "@/lib/session";
@@ -42,11 +42,7 @@ export default async function DeficiencyNoticePage({
 
   if (!ticket) notFound();
 
-  const liveRules = evaluateAphRules({
-    applicationType: app.applicationType,
-    institution: app.institution,
-    documents: app.institution.documents,
-  });
+  const liveRules = evaluateAphRules(aphInputFor(app));
   const liveFlagged = liveRules.filter((rule) => rule.status !== "PASSED");
   const persistedFlagged = app.ruleChecks.filter((rule) => rule.status !== "PASSED");
 

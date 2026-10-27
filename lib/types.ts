@@ -318,6 +318,8 @@ export const ESCALATION_STATUS_META: Record<string, { label: string; tone: strin
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
   APPLICATION_SUBMITTED: "Application submitted",
+  APPLICATION_FILED: "Application filed",
+  FILING_BRIEF_GENERATED: "Filing scrutiny brief generated",
   SCRUTINY_COMMENCED: "Scrutiny commenced",
   APH_EVALUATION_RUN: "APH rule evaluation executed",
   DEFICIENCY_ISSUED: "Formal deficiency notice issued",
@@ -360,6 +362,7 @@ export const CAPABILITIES = [
   "UPLOAD_EVIDENCE",
   "VERIFY_EVIDENCE",
   "APPLY_EXTRACTION",
+  "FILE_APPLICATION",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -378,6 +381,7 @@ const CAPABILITY_MATRIX: Record<Capability, Role[]> = {
   UPLOAD_EVIDENCE: ["INSTITUTION_ADMIN"],
   VERIFY_EVIDENCE: ["INSTITUTION_ADMIN", "REGIONAL_OFFICER", "COMPLIANCE_HEAD", "BUREAU_OFFICER"],
   APPLY_EXTRACTION: ["INSTITUTION_ADMIN", "REGIONAL_OFFICER"],
+  FILE_APPLICATION: ["INSTITUTION_ADMIN"],
 };
 
 export function can(role: Role, capability: Capability): boolean {

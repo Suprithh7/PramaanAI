@@ -35,6 +35,19 @@ export type AphInput = {
   now?: Date;
 };
 
+export type AphDeclaration = {
+  studentIntake: number;
+  facultyCount: number;
+  builtUpAreaSqM: number;
+  totalLandAcres: number;
+  leaseExpiry: Date | string;
+  fireExpiry: Date | string;
+  buildingExpiry: Date | string;
+  undertakingSignedOn: Date | string;
+};
+
+export const DECLARATION_DOC_REF = "Filing declaration";
+
 const DAY_MS = 86_400_000;
 
 function docOf(documents: AphDocument[], type: DocType): AphDocument | undefined {
@@ -67,6 +80,8 @@ export function evaluateAphRules(input: AphInput): AphRuleResult[] {
   const now = input.now ?? new Date();
   const { institution, documents, applicationType } = input;
   const results: AphRuleResult[] = [];
+  const declared = documents.some((doc) => doc.documentRef === DECLARATION_DOC_REF);
+  const origin = (fallback: string) => (declared ? DECLARATION_DOC_REF : fallback);
 
   const faculty = institution.facultyCount;
   const intake = institution.studentIntake;
@@ -83,7 +98,7 @@ export function evaluateAphRules(input: AphInput): AphRuleResult[] {
       faculty > 0 && ratio <= 15
         ? `Ratio is within the APH ceiling with a headroom of ${(15 * faculty - intake).toFixed(0)} students.`
         : "Appoint additional full-time faculty or reduce the requested intake before re-scrutiny.",
-    source: "Institution Faculty Register",
+    source: origin("Institution Faculty Register"),
   });
 
   const areaPerStudent = intake > 0 ? institution.builtUpAreaSqM / intake : 0;
@@ -99,7 +114,7 @@ export function evaluateAphRules(input: AphInput): AphRuleResult[] {
       intake > 0 && areaPerStudent >= 10
         ? "Built-up area statement is consistent with the sanctioned plan."
         : "Submit a revised architectural area statement or sanctioned additional built-up area.",
-    source: "Architectural Area Statement",
+    source: origin("Architectural Area Statement"),
   });
 
   const lease = docOf(documents, "LEASE_DEED");
@@ -116,7 +131,7 @@ export function evaluateAphRules(input: AphInput): AphRuleResult[] {
       lease && leaseYears >= 30 && docIsLive(lease, now)
         ? "Registered lease deed satisfies the 30-year unexpired tenure requirement."
         : "Execute a registered lease extension or produce a fresh 30-year lease deed.",
-    source: "Registered Lease Deed",
+    source: origin("Registered Lease Deed"),
   });
 
   const fire = docOf(documents, "FIRE_SAFETY");
@@ -134,7 +149,7 @@ export function evaluateAphRules(input: AphInput): AphRuleResult[] {
         ? `Certificate is valid but renewal is due by ${fmtDate(fire.expiryDate)}.`
         : "Fire safety clearance is current and verified against the issuing authority."
       : "Produce a current fire safety certificate from the State Fire Department.",
-    source: "State Fire Department",
+    source: origin("State Fire Department"),
   });
 
   const building = docOf(documents, "BUILDING_PLAN");
@@ -150,7 +165,7 @@ export function evaluateAphRules(input: AphInput): AphRuleResult[] {
     remarks: buildingOk
       ? "Sanctioned plan covers the buildings declared in the application."
       : "Submit the sanctioned plan revision covering the proposed built-up area.",
-    source: "Town Planning Authority",
+    source: origin("Town Planning Authority"),
   });
 
   const undertaking = docOf(documents, "UNDERTAKING");
@@ -163,12 +178,16 @@ export function evaluateAphRules(input: AphInput): AphRuleResult[] {
     requirement:
       "A signed undertaking from the head of the institution affirming compliance with APH norms and AICTE regulations.",
     requiredValue: "Signed undertaking on record",
-    submittedValue: undertaking ? docLabel(undertaking) : "Undertaking not on record",
+    submittedValue: undertaking
+      ? undertaking.documentRef === DECLARATION_DOC_REF
+        ? `Signed ${fmtDate(undertaking.expiryDate)}`
+        : docLabel(undertaking)
+      : "Undertaking not on record",
     status: undertakingOk ? "PASSED" : "DEFICIENCY_FLAGGED",
     remarks: undertakingOk
       ? "Undertaking is signed by the authorised signatory and registered against the institution."
       : "Upload the undertaking signed by the Registrar or head of institution.",
-    source: "Institutional Record",
+    source: origin("Institutional Record"),
   });
 
   if (applicationType === "NEW_INSTITUTE") {
@@ -184,7 +203,7 @@ export function evaluateAphRules(input: AphInput): AphRuleResult[] {
       remarks: landOk
         ? "Land parcel meets the minimum contiguous area for a new institute."
         : "Produce a sale deed or lease for additional contiguous land.",
-      source: "Land Record / Sale Deed",
+      source: origin("Land Record / Sale Deed"),
     });
   }
 
@@ -199,5 +218,81 @@ export function aphSummary(results: AphRuleResult[]) {
     flagged,
     total: results.length,
     score: results.length > 0 ? Math.round((passed / results.length) * 100) : 0,
+  };
+}
+
+function declaredStatus(value: Date | string, now: Date): string {
+  return expiry(value).getTime() > now.getTime() ? "VALID" : "EXPIRED";
+}
+
+/**
+ * A filing declares its own capacity and statutory dates, so the APH matrix is
+ * computed from the numbers on the application rather than the institution register.
+ */
+export function declarationToAphInput(
+  applicationType: string,
+  declaration: AphDeclaration,
+  institutionName = "",
+  now: Date = new Date(),
+): AphInput {
+  return {
+    applicationType,
+    institution: {
+      name: institutionName,
+      studentIntake: declaration.studentIntake,
+      facultyCount: declaration.facultyCount,
+      builtUpAreaSqM: declaration.builtUpAreaSqM,
+      totalLandAcres: declaration.totalLandAcres,
+    },
+    documents: [
+      {
+        docType: "LEASE_DEED",
+        status: declaredStatus(declaration.leaseExpiry, now),
+        expiryDate: declaration.leaseExpiry,
+        documentRef: DECLARATION_DOC_REF,
+      },
+      {
+        docType: "FIRE_SAFETY",
+        status: declaredStatus(declaration.fireExpiry, now),
+        expiryDate: declaration.fireExpiry,
+        documentRef: DECLARATION_DOC_REF,
+      },
+      {
+        docType: "BUILDING_PLAN",
+        status: declaredStatus(declaration.buildingExpiry, now),
+        expiryDate: declaration.buildingExpiry,
+        documentRef: DECLARATION_DOC_REF,
+      },
+      {
+        docType: "UNDERTAKING",
+        status: "VALID",
+        expiryDate: declaration.undertakingSignedOn,
+        documentRef: DECLARATION_DOC_REF,
+      },
+    ],
+    now,
+  };
+}
+
+export type AphApplicationSource = {
+  applicationType: string;
+  institution: AphInstitution & { documents?: AphDocument[] | null };
+  filingDeclaration?: AphDeclaration | null;
+};
+
+export function aphInputFor(app: AphApplicationSource, now?: Date): AphInput {
+  if (app.filingDeclaration) {
+    return declarationToAphInput(
+      app.applicationType,
+      app.filingDeclaration,
+      app.institution.name,
+      now,
+    );
+  }
+  return {
+    applicationType: app.applicationType,
+    institution: app.institution,
+    documents: app.institution.documents ?? [],
+    now,
   };
 }

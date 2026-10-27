@@ -324,15 +324,18 @@ export function toEvidenceRow(record: EvidenceSource): EvidenceRow {
   let note: string | null = null;
   let drivers: ClassifierDriver[] = [];
   let runnerUp: { type: string; probability: number } | null = null;
+  let geminiAudit: EvidenceRow["geminiAudit"] = null;
   try {
     const parsed = JSON.parse(record.extracted) as {
       fields?: ExtractedField[];
       note?: string | null;
       drivers?: ClassifierDriver[];
       runnerUp?: { type: string; probability: number } | null;
+      geminiAudit?: EvidenceRow["geminiAudit"];
     };
     fields = Array.isArray(parsed.fields) ? parsed.fields : [];
     note = parsed.note ?? null;
+    geminiAudit = parsed.geminiAudit ?? null;
     drivers = Array.isArray(parsed.drivers)
       ? parsed.drivers.filter(
           (driver): driver is ClassifierDriver =>
@@ -385,5 +388,6 @@ export function toEvidenceRow(record: EvidenceSource): EvidenceRow {
       (!record.hasTextLayer || record.typeConfidence < 0.6 || docType === "OTHER"),
     reviewedBy: record.reviewedBy,
     reviewedAt: record.reviewedAt ? record.reviewedAt.toISOString() : null,
+    geminiAudit,
   };
 }

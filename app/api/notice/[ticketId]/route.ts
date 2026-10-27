@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { evaluateAphRules } from "@/lib/aph";
+import { aphInputFor, evaluateAphRules } from "@/lib/aph";
 import { fmtDate, truncateHash } from "@/lib/format";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
@@ -42,6 +42,7 @@ export async function GET(
       application: {
         include: {
           institution: { include: { documents: true } },
+          filingDeclaration: true,
           ruleChecks: true,
           auditLogs: {
             where: { action: "DEFICIENCY_ISSUED" },
@@ -65,11 +66,7 @@ export async function GET(
 
   const app = ticket.application;
   const institution = app.institution;
-  const live = evaluateAphRules({
-    applicationType: app.applicationType,
-    institution,
-    documents: institution.documents,
-  });
+  const live = evaluateAphRules(aphInputFor(app));
   const flagged = live.filter((rule) => rule.status !== "PASSED");
   const persisted = app.ruleChecks.filter((rule) => rule.status !== "PASSED");
 

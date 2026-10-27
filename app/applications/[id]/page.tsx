@@ -16,6 +16,7 @@ import {
   Printer,
   Scale,
   ShieldCheck,
+  Sparkles,
   Timer,
 } from "lucide-react";
 import {
@@ -25,13 +26,15 @@ import {
   commenceScrutinyAction,
   decideApplicationAction,
   raiseDeficiencyAction,
+  regenerateFilingBriefAction,
   resubmitDeficiencyAction,
   routeToShcAction,
   runAphAction,
   scheduleEvcAction,
   submitSiteReportAction,
 } from "@/app/actions";
-import { evaluateAphRules, aphSummary } from "@/lib/aph";
+import { parseFilingBrief } from "@/lib/ai";
+import { aphInputFor, aphSummary, evaluateAphRules } from "@/lib/aph";
 import { getConsistencyReport } from "@/lib/consistency";
 import { checkConflict, EVC_ROSTER } from "@/lib/evc";
 import { canAcceptResubmission, canDecide, canRaiseDeficiency, canRunAph, canScheduleEvc, canSubmitSiteReport, pathHasEvc } from "@/lib/fsm";
@@ -68,14 +71,17 @@ import { EmptyState, SlaMeter } from "@/components/ui/EmptyState";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CaseActionForm } from "@/components/case/CaseActionForm";
 import { EvidenceIntake } from "@/components/case/EvidenceIntake";
+import { FilingBriefPanel } from "@/components/case/FilingBriefPanel";
 import { LiveStatutoryClock } from "@/components/case/LiveStatutoryClock";
 import { WorkflowRail } from "@/components/case/WorkflowRail";
+import { AiScrutinyCopilot } from "@/components/ai/AiScrutinyCopilot";
 import { DOC_TYPE_LABELS } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 const TABS = [
   { key: "case", label: "Case file", icon: FileText },
+  { key: "copilot", label: "AI Scrutiny Desk", icon: Sparkles },
   { key: "aph", label: "APH matrix", icon: Scale },
   { key: "deficiency", label: "Deficiency & evidence", icon: FileCheck2 },
   { key: "evc", label: "EVC inspection", icon: ClipboardCheck },
@@ -108,11 +114,7 @@ export default async function ApplicationCasePage({
   const deadline = stageDeadline(app.stageEnteredAt);
   const overdue = daysOverdue(app.stageEnteredAt);
 
-  const liveRules = evaluateAphRules({
-    applicationType: app.applicationType,
-    institution: app.institution,
-    documents: app.institution.documents,
-  });
+  const liveRules = evaluateAphRules(aphInputFor(app));
   const liveSummary = aphSummary(liveRules);
   const flaggedRules = liveRules.filter((rule) => rule.status !== "PASSED");
   const persistedFlagged = app.ruleChecks.filter((rule) => rule.status !== "PASSED");
@@ -147,11 +149,17 @@ export default async function ApplicationCasePage({
   const canRouteShc = role === "BUREAU_OFFICER" && app.status === "SAC_REVIEW";
 
   const regionMeta = REGION_META[app.institution.region as Region];
-  const admissions = app.institution.studentIntake;
-  const areaPerStudent =
-    admissions > 0 ? app.institution.builtUpAreaSqM / admissions : 0;
-  const facultyRatio = app.institution.facultyCount > 0 ? admissions / app.institution.facultyCount : 0;
+  const declaration = app.filingDeclaration;
+  const admissions = declaration?.studentIntake ?? app.institution.studentIntake;
+  const builtUpArea = declaration?.builtUpAreaSqM ?? app.institution.builtUpAreaSqM;
+  const facultyCount = declaration?.facultyCount ?? app.institution.facultyCount;
+  const landAcres = declaration?.totalLandAcres ?? app.institution.totalLandAcres;
+  const areaPerStudent = admissions > 0 ? builtUpArea / admissions : 0;
+  const facultyRatio = facultyCount > 0 ? admissions / facultyCount : 0;
   const lease = app.institution.documents.find((document) => document.docType === "LEASE_DEED");
+  const leaseExpiry = declaration?.leaseExpiry ?? lease?.expiryDate ?? null;
+  const filingBrief = app.filingBrief ? parseFilingBrief(app.filingBrief.payload) : null;
+  const canBrief = can(role, "RUN_APH") || can(role, "FILE_APPLICATION");
   const evidenceRows = app.evidenceFiles.map(toEvidenceRow);
   const evidenceTampered = evidenceRows.filter((row) => row.integrity === "TAMPERED").length;
   const consistency = activeTab === "evidence" ? await getConsistencyReport(app.institutionId) : null;
@@ -247,19 +255,21 @@ export default async function ApplicationCasePage({
             const badge =
               item.key === "aph"
                 ? liveSummary.flagged
-                : item.key === "deficiency"
-                  ? openTicket
-                    ? 1
-                    : 0
-                  : item.key === "evc"
-                    ? latestInspection?.siteReportStatus === "OVERDUE"
+                : item.key === "copilot"
+                  ? liveSummary.flagged
+                  : item.key === "deficiency"
+                    ? openTicket
                       ? 1
                       : 0
-                    : item.key === "evidence"
-                      ? evidenceRows.length
-                      : item.key === "ledger"
-                        ? app.auditLogs.length
-                        : 0;
+                    : item.key === "evc"
+                      ? latestInspection?.siteReportStatus === "OVERDUE"
+                        ? 1
+                        : 0
+                      : item.key === "evidence"
+                        ? evidenceRows.length
+                        : item.key === "ledger"
+                          ? app.auditLogs.length
+                          : 0;
             return (
               <Link
                 key={item.key}
@@ -336,13 +346,15 @@ export default async function ApplicationCasePage({
                       <div className="eyebrow">Statutory profile · as filed</div>
                       <h2 className="panel-title mt-0.5">Institutional capacity metrics</h2>
                     </div>
-                    <span className="text-[9px] text-slate-500">{app.institution.state}</span>
+                    <span className="badge border-slate-300 bg-slate-50 text-slate-600">
+                      {declaration ? "Filed declaration" : "Institution register"}
+                    </span>
                   </div>
                   <div className="grid grid-cols-2 gap-px bg-slate-200 sm:grid-cols-3">
                     {[
-                      ["Total land", `${app.institution.totalLandAcres.toFixed(1)} acres`, app.institution.totalLandAcres >= 10 ? "pass" : "fail"],
-                      ["Built-up area", `${fmtNumber(app.institution.builtUpAreaSqM)} sqm`, areaPerStudent >= 10 ? "pass" : "fail"],
-                      ["Full-time faculty", fmtNumber(app.institution.facultyCount), facultyRatio <= 15 ? "pass" : "fail"],
+                      ["Total land", `${landAcres.toFixed(1)} acres`, landAcres >= 10 ? "pass" : "fail"],
+                      ["Built-up area", `${fmtNumber(builtUpArea)} sqm`, areaPerStudent >= 10 ? "pass" : "fail"],
+                      ["Full-time faculty", fmtNumber(facultyCount), facultyRatio <= 15 ? "pass" : "fail"],
                       ["Sanctioned intake", fmtNumber(admissions), "neutral"],
                       ["Area per student", `${areaPerStudent.toFixed(2)} sqm`, areaPerStudent >= 10 ? "pass" : "fail"],
                       ["Faculty ratio", facultyRatio > 0 ? `1:${facultyRatio.toFixed(2)}` : "—", facultyRatio <= 15 ? "pass" : "fail"],
@@ -363,8 +375,10 @@ export default async function ApplicationCasePage({
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/70 px-4 py-2 text-[9px] text-slate-500">
                     <span>
-                      Lease deed {lease ? `expires ${fmtDate(lease.expiryDate)}` : "not on record"} · affiliating university{" "}
-                      {app.institution.affiliatingUniversity}
+                      {declaration
+                        ? `Lease declared to ${fmtDate(leaseExpiry)}`
+                        : `Lease deed ${lease ? `expires ${fmtDate(lease.expiryDate)}` : "not on record"}`}{" "}
+                      · affiliating university {app.institution.affiliatingUniversity}
                     </span>
                     <span className="font-mono">{app.institution.latitude.toFixed(4)}, {app.institution.longitude.toFixed(4)}</span>
                   </div>
@@ -520,6 +534,76 @@ export default async function ApplicationCasePage({
               </>
             )}
 
+            {activeTab === "copilot" && (
+              <div className="space-y-4">
+                <section className="panel overflow-hidden border border-brass-400/40 bg-gradient-to-r from-navy-950 via-navy-900 to-navy-950 p-4 text-white">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-brass-400/50 bg-brass-500/20 text-brass-300">
+                        <Sparkles size={18} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="font-serif text-base font-semibold text-white">
+                            AICTE AI Scrutiny Intelligence Desk
+                          </h2>
+                          <span className="border border-brass-400/40 bg-brass-400/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-label text-brass-300">
+                            Powered by Gemini 3 Flash
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-navy-300 max-w-2xl leading-relaxed">
+                          Autonomous regulatory intelligence synthesizing the live APH 2026–27 rule matrix, institutional evidence digests, and statutory deficiency formulations.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="border border-white/10 bg-white/[0.04] px-3 py-1.5 text-right">
+                        <div className="text-[8px] uppercase tracking-wider text-navy-400">Scrutiny Score</div>
+                        <div className={`font-serif text-lg font-bold leading-none ${liveSummary.score >= 70 ? "text-emerald-400" : "text-amber-400"}`}>
+                          {liveSummary.score}%
+                        </div>
+                      </div>
+                      <div className="border border-white/10 bg-white/[0.04] px-3 py-1.5 text-right">
+                        <div className="text-[8px] uppercase tracking-wider text-navy-400">Live Flags</div>
+                        <div className={`font-serif text-lg font-bold leading-none ${flaggedRules.length === 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {flaggedRules.length}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <AiScrutinyCopilot
+                  context={{
+                    institutionName: app.institution.name,
+                    referenceNo: app.referenceNo,
+                    programName: app.programName,
+                    studentIntake: admissions,
+                    facultyCount: facultyCount,
+                    builtUpAreaSqM: builtUpArea,
+                    totalLandAcres: landAcres,
+                    flaggedRules: flaggedRules.map((r) => ({
+                      ruleCode: r.ruleCode,
+                      ruleName: r.ruleName,
+                      submittedValue: r.submittedValue,
+                      requiredValue: r.requiredValue,
+                    })),
+                  }}
+                />
+
+                {filingBrief && app.filingBrief && (
+                  <FilingBriefPanel
+                    applicationId={app.id}
+                    payload={filingBrief}
+                    engine={app.filingBrief.engine}
+                    model={app.filingBrief.model}
+                    generatedAt={app.filingBrief.generatedAt}
+                    canRegenerate={canBrief}
+                  />
+                )}
+              </div>
+            )}
+
             {activeTab === "aph" && (
               <>
                 <section className="panel">
@@ -582,7 +666,10 @@ export default async function ApplicationCasePage({
                     </div>
                   ) : (
                     <div className="flex items-center gap-1.5 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-[10px] text-emerald-900">
-                      <CheckCircle2 size={11} /> All live APH checks pass against the current statutory profile and documents.
+                      <CheckCircle2 size={11} />{" "}
+                      {declaration
+                        ? "All live APH checks pass against the figures declared at filing."
+                        : "All live APH checks pass against the current statutory profile and documents."}
                     </div>
                   )}
 
@@ -629,6 +716,44 @@ export default async function ApplicationCasePage({
                     </span>
                   </div>
                 </section>
+
+                {filingBrief && app.filingBrief ? (
+                  <FilingBriefPanel
+                    applicationId={app.id}
+                    payload={filingBrief}
+                    engine={app.filingBrief.engine}
+                    model={app.filingBrief.model}
+                    generatedAt={app.filingBrief.generatedAt}
+                    canRegenerate={canBrief}
+                  />
+                ) : (
+                  <section className="panel">
+                    <div className="panel-header">
+                      <div>
+                        <div className="eyebrow">Filing scrutiny brief</div>
+                        <h2 className="panel-title mt-0.5">No brief composed for this case</h2>
+                      </div>
+                      <Sparkles size={13} className="text-brass-600" />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+                      <p className="max-w-xl text-[10px] leading-relaxed text-slate-600">
+                        The brief is composed from the APH matrix and cites every observed and
+                        threshold value. Cases filed before this module do not carry one.
+                      </p>
+                      {canBrief && (
+                        <ActionButton
+                          action={regenerateFilingBriefAction}
+                          fields={{ applicationId: app.id }}
+                          label="Generate brief"
+                          pendingLabel="Composing…"
+                          variant="brass"
+                          size="xs"
+                          icon={<Sparkles size={10} />}
+                        />
+                      )}
+                    </div>
+                  </section>
+                )}
 
                 <section className="panel">
                   <div className="panel-header">
@@ -701,14 +826,26 @@ export default async function ApplicationCasePage({
                         fields={[
                           {
                             name: "details",
-                            label: "Deficiency statement",
+                            label: "Deficiency statement (APH 2026–27 Statutory Citations)",
                             type: "textarea",
                             required: true,
+                            defaultValue:
+                              flaggedRules.length > 0
+                                ? `Statutory Scrutiny Deficiency Notice under AICTE Approval Process Handbook (APH 2026–27):\n` +
+                                  flaggedRules
+                                    .map(
+                                      (rule, i) =>
+                                        `${i + 1}. [${rule.ruleCode}] ${rule.ruleName}: Submitted figure "${rule.submittedValue}" fails statutory norm "${rule.requiredValue}". Required corrective action: ${rule.remarks}`,
+                                    )
+                                    .join("\n") +
+                                  `\n\nThe applicant institution is hereby directed to upload verified documentary evidence satisfying the aforementioned norms within the statutory compliance deadline.`
+                                : undefined,
                             placeholder:
                               "State each failed rule, the observed shortfall and the evidence required (minimum 30 characters).",
-                            hint: flaggedRules.length > 0
-                              ? `Currently flagged: ${flaggedRules.map((rule) => `${rule.ruleCode} ${rule.ruleName}`).join("; ")}.`
-                              : undefined,
+                            hint:
+                              flaggedRules.length > 0
+                                ? `Auto-drafted from ${flaggedRules.length} flagged APH rules. Officers can review and customize before issuing.`
+                                : undefined,
                             span: 2,
                           },
                           {
@@ -840,8 +977,8 @@ export default async function ApplicationCasePage({
                                       min: 1000,
                                       max: 2_000_000,
                                       step: 1,
-                                      placeholder: String(app.institution.builtUpAreaSqM),
-                                      hint: `APH-102 needs at least ${fmtNumber(admissions * 10)} sqm for the current intake.`,
+                                      placeholder: String(builtUpArea),
+                                      hint: `APH-102 needs at least ${fmtNumber(admissions * 10)} sqm for the declared intake.`,
                                     },
                                     {
                                       name: "revisedFacultyCount",
@@ -850,7 +987,7 @@ export default async function ApplicationCasePage({
                                       min: 1,
                                       max: 20_000,
                                       step: 1,
-                                      placeholder: String(app.institution.facultyCount),
+                                      placeholder: String(facultyCount),
                                       hint: "Only supply a value if the faculty register was revised.",
                                     },
                                     {
@@ -864,7 +1001,7 @@ export default async function ApplicationCasePage({
                                   submitLabel="Submit evidence"
                                   pendingLabel="Submitting…"
                                   variant="primary"
-                                  description="The application returns to RE_SCRUTINY. Revised statutory metrics, if supplied, update the institution profile before re-evaluation."
+                                  description={`The application returns to RE_SCRUTINY. Revised statutory metrics, if supplied, update the ${declaration ? "filed declaration" : "institution profile"} before re-evaluation.`}
                                   confirm="Submit evidence and return this case to re-scrutiny?"
                                 />
                               </div>

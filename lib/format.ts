@@ -59,6 +59,12 @@ export function fmtClock(value: DateLike | null | undefined): string {
   }).format(toDate(value));
 }
 
+export function istYear(value: DateLike = new Date()): number {
+  return Number(
+    new Intl.DateTimeFormat("en-GB", { year: "numeric", timeZone: IST }).format(toDate(value)),
+  );
+}
+
 export function fmtNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return new Intl.NumberFormat("en-IN").format(value);

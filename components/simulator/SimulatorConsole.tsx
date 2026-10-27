@@ -8,9 +8,11 @@ import {
   CheckCircle2,
   FlaskConical,
   Gauge,
+  Loader2,
   MapPin,
   RotateCcw,
   SlidersHorizontal,
+  Sparkles,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
@@ -106,39 +108,6 @@ const CLEAR_STATE: TwinState = {
   buildingStatus: "VALID",
   undertakingStatus: "VALID",
 };
-
-const PRESETS: Array<{ id: string; label: string; note: string; state: TwinState }> = [
-  {
-    id: "faculty",
-    label: "Faculty gap",
-    note: "Intake expansion · 1,200 seats against 63 faculty (1:19.05).",
-    state: DEFAULT_STATE,
-  },
-  {
-    id: "clear",
-    label: "Clearance-ready",
-    note: "New institute with every APH control satisfied.",
-    state: CLEAR_STATE,
-  },
-  {
-    id: "lease",
-    label: "Lease cliff",
-    note: "All levers clear except 28 unexpired lease years.",
-    state: { ...CLEAR_STATE, leaseYears: 28 },
-  },
-  {
-    id: "certificates",
-    label: "Certificate lapse",
-    note: "Fire safety expired and building plan approaching expiry.",
-    state: { ...CLEAR_STATE, fireStatus: "EXPIRED", buildingStatus: "EXPIRING_SOON" },
-  },
-  {
-    id: "greenfield",
-    label: "Greenfield shortfall",
-    note: "New institute with 8.4 acres and 22 lease years.",
-    state: { ...CLEAR_STATE, totalLandAcres: 8.4, leaseYears: 22 },
-  },
-];
 
 function isApplicationType(value: string): value is ApplicationType {
   return (APPLICATION_TYPES as readonly string[]).includes(value);
@@ -419,11 +388,9 @@ function ScoreRing({
 export function SimulatorConsole({ seeds, nowIso }: { seeds: SimSeed[]; nowIso: string }) {
   const now = useMemo(() => new Date(nowIso), [nowIso]);
   const [state, setState] = useState<TwinState>(() => ({ ...DEFAULT_STATE }));
-  const [presetId, setPresetId] = useState("faculty");
   const [seedId, setSeedId] = useState("");
 
   const seed = seeds.find((entry) => entry.id === seedId) ?? null;
-  const activePreset = PRESETS.find((entry) => entry.id === presetId) ?? null;
 
   const { results, summary, ratio } = useMemo(() => {
     const evaluated = evaluateAphRules(buildInput(state, now));
@@ -469,28 +436,53 @@ export function SimulatorConsole({ seeds, nowIso }: { seeds: SimSeed[]; nowIso: 
   const baseline = seed?.baseline ?? null;
   const baselineDelta = baseline ? baseline.flagged - summary.flagged : 0;
 
-  function update(patch: Partial<TwinState>) {
-    setState((previous) => ({ ...previous, ...patch }));
-    setPresetId("");
+  const [aiAdvice, setAiAdvice] = useState<{ answer: string; citations: string[] } | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  async function runAiOptimizationAdvice() {
+    setAiLoading(true);
+    try {
+      const res = await fetch("/api/ai/copilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: `Analyze this proposed technical institution configuration for statutory compliance under AICTE Approval Process Handbook (APH 2026-27):
+- Application Category: ${state.applicationType}
+- Sanctioned Student Intake: ${state.studentIntake}
+- Full-Time Faculty: ${state.facultyCount} (FSR 1:${Number.isFinite(ratio) ? ratio.toFixed(2) : "N/A"})
+- Built-up Area: ${state.builtUpAreaSqM} sqm (${state.studentIntake > 0 ? (state.builtUpAreaSqM / state.studentIntake).toFixed(2) : "N/A"} sqm/student)
+- Campus Land: ${state.totalLandAcres} acres
+- Unexpired Land Lease: ${state.leaseYears} years (Status: ${state.leaseStatus})
+- Fire Safety Certificate: ${state.fireStatus}
+- Building Sanction Plan: ${state.buildingStatus}
+
+Give an executive statutory review citing APH norm clauses and exact adjustments needed to achieve 100% compliance.`,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiAdvice({ answer: data.answer, citations: data.citations || [] });
+      }
+    } catch {
+      //
+    } finally {
+      setAiLoading(false);
+    }
   }
 
-  function applyPreset(preset: (typeof PRESETS)[number]) {
-    setState({ ...preset.state });
-    setPresetId(preset.id);
-    setSeedId("");
+  function update(patch: Partial<TwinState>) {
+    setState((previous) => ({ ...previous, ...patch }));
   }
 
   function loadSeed(id: string) {
     if (!id) {
       setState({ ...DEFAULT_STATE });
-      setPresetId("faculty");
       setSeedId("");
       return;
     }
     const found = seeds.find((entry) => entry.id === id);
     if (!found) return;
     setState(seedToState(found, now));
-    setPresetId("");
     setSeedId(id);
   }
 
@@ -500,47 +492,16 @@ export function SimulatorConsole({ seeds, nowIso }: { seeds: SimSeed[]; nowIso: 
         <div className="panel-header">
           <div>
             <div className="eyebrow flex items-center gap-1">
-              <SlidersHorizontal size={10} /> Input deck
+              <SlidersHorizontal size={10} /> Regulatory Controls
             </div>
             <h2 className="panel-title mt-0.5">Institution parameters</h2>
           </div>
-          <span className="badge border-slate-300 bg-slate-50 text-slate-600">Replayable</span>
-        </div>
-
-        <div className="border-b border-slate-200 p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="field-label mb-0">Scenario presets</span>
-            <span className="text-[8px] uppercase tracking-label text-slate-400">One click</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {PRESETS.map((preset) => {
-              const active = presetId === preset.id;
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  title={preset.note}
-                  aria-pressed={active}
-                  onClick={() => applyPreset(preset)}
-                  className={`border px-2 py-1 text-[9px] font-semibold uppercase tracking-label transition ${
-                    active
-                      ? "border-navy-900 bg-navy-900 text-white"
-                      : "border-slate-300 bg-white text-slate-600 hover:border-navy-400 hover:text-navy-900"
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-2 text-[9px] leading-snug text-slate-500">
-            {activePreset?.note ?? "Manual scenario — adjust the levers below."}
-          </p>
+          <span className="badge border-slate-300 bg-slate-50 text-slate-600">Simulated Profile</span>
         </div>
 
         <div className="border-b border-slate-200 p-3">
           <label htmlFor="twin-seed" className="field-label">
-            Seed from a live institution
+            Load Registered AICTE Institution Baseline
           </label>
           <select
             id="twin-seed"
@@ -548,7 +509,7 @@ export function SimulatorConsole({ seeds, nowIso }: { seeds: SimSeed[]; nowIso: 
             value={seedId}
             onChange={(event) => loadSeed(event.target.value)}
           >
-            <option value="">Custom / preset scenario</option>
+            <option value="">Custom simulated profile</option>
             {seeds.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.code} · {entry.name}
@@ -563,10 +524,7 @@ export function SimulatorConsole({ seeds, nowIso }: { seeds: SimSeed[]; nowIso: 
                 {seed.documents.length === 1 ? "" : "s"} loaded
               </>
             ) : (
-              <>
-                <Building2 size={9} className="mt-[2px] shrink-0 text-slate-400" />
-                Load a real institution, then change one lever to see what moves.
-              </>
+              "Select an institution to load its verified capacity and documents, or adjust custom figures below."
             )}
           </p>
           {baseline && (
@@ -580,6 +538,39 @@ export function SimulatorConsole({ seeds, nowIso }: { seeds: SimSeed[]; nowIso: 
               <div className="mt-0.5 text-[8px] uppercase tracking-label text-slate-400">
                 Latest filing · {baseline.status.replaceAll("_", " ")}
               </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-b border-slate-200 bg-brass-50/40 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-navy-950 font-semibold text-[10px]">
+              <Sparkles size={12} className="text-brass-700" />
+              <span>Gemini AI Compliance Advisor</span>
+            </div>
+            <button
+              type="button"
+              disabled={aiLoading}
+              onClick={runAiOptimizationAdvice}
+              className="btn btn-brass btn-xs inline-flex items-center gap-1"
+            >
+              {aiLoading ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />}
+              {aiLoading ? "Consulting Gemini…" : "Analyze Compliance"}
+            </button>
+          </div>
+          {aiAdvice && (
+            <div className="mt-2.5 border border-brass-300 bg-white p-2.5 text-[10px] leading-relaxed text-navy-950">
+              <div className="whitespace-pre-line text-slate-700">{aiAdvice.answer}</div>
+              {aiAdvice.citations.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-1.5 text-[8px] text-slate-500">
+                  <span className="font-semibold uppercase tracking-wider">Citations:</span>
+                  {aiAdvice.citations.map((c, i) => (
+                    <span key={i} className="border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono text-navy-800">
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -11,7 +11,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { commenceScrutinyAction, clearScrutinyAction, raiseDeficiencyAction, runAphAction } from "@/app/actions";
-import { evaluateAphRules, aphSummary } from "@/lib/aph";
+import { aphInputFor, aphSummary, evaluateAphRules } from "@/lib/aph";
 import { slaRows } from "@/lib/analytics";
 import { auditActionLabel } from "@/lib/types";
 import {
@@ -35,6 +35,7 @@ import { EmptyState, SlaMeter } from "@/components/ui/EmptyState";
 import { ActionButton } from "@/components/ui/ActionFeedback";
 import { DeficiencyStatusBadge, RuleStatusBadge, SlaBadge, StatusBadge } from "@/components/ui/Badges";
 import { CaseActionForm } from "@/components/case/CaseActionForm";
+import { AiScrutinyCopilot } from "@/components/ai/AiScrutinyCopilot";
 
 export const dynamic = "force-dynamic";
 
@@ -68,13 +69,7 @@ export default async function ScrutinyPage({
   const breaches = queue.filter((row) => row.sla === "BREACHED").length;
   const oldest = queue[0]?.days ?? 0;
 
-  const liveRules = selected
-    ? evaluateAphRules({
-        applicationType: selected.applicationType,
-        institution: selected.institution,
-        documents: selected.institution.documents,
-      })
-    : [];
+  const liveRules = selected ? evaluateAphRules(aphInputFor(selected)) : [];
   const liveSummary = aphSummary(liveRules);
   const liveFlagged = liveRules.filter((rule) => rule.status !== "PASSED");
   const openTicket = selected?.deficiencies.find((ticket) => ticket.status === "OPEN");
@@ -396,6 +391,27 @@ export default async function ScrutinyPage({
                 </div>
               </div>
             </section>
+
+            {selected && (
+              <AiScrutinyCopilot
+                context={{
+                  institutionName: selected.institution.name,
+                  referenceNo: selected.referenceNo,
+                  programName: selected.programName,
+                  studentIntake: selected.filingDeclaration?.studentIntake ?? selected.institution.studentIntake,
+                  facultyCount: selected.filingDeclaration?.facultyCount ?? selected.institution.facultyCount,
+                  builtUpAreaSqM: selected.filingDeclaration?.builtUpAreaSqM ?? selected.institution.builtUpAreaSqM,
+                  totalLandAcres: selected.filingDeclaration?.totalLandAcres ?? selected.institution.totalLandAcres,
+                  flaggedRules: liveFlagged.map((r) => ({
+                    ruleCode: r.ruleCode,
+                    ruleName: r.ruleName,
+                    submittedValue: r.submittedValue,
+                    requiredValue: r.requiredValue,
+                  })),
+                }}
+                embedded
+              />
+            )}
 
             {canRaise && (
               <section className="panel">

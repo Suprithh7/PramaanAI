@@ -96,6 +96,32 @@ export type EvidenceRow = {
   needsReview: boolean;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  geminiAudit?: {
+    documentTypeDetected: string;
+    confidence: number;
+    institutionNamed: string | null;
+    extractedFields: {
+      institutionName?: string;
+      landAcres?: number | null;
+      builtUpAreaSqM?: number | null;
+      facultyCount?: number | null;
+      intake?: number | null;
+      leaseYears?: number | null;
+      expiryDate?: string | null;
+      registrationOrRefNo?: string | null;
+      issuingAuthority?: string | null;
+    };
+    forensicAudit: {
+      authenticityScore: number;
+      integrityRating: "VERIFIED" | "SUSPICIOUS" | "TAMPER_SUSPECTED";
+      sealDetected: boolean;
+      signatureDetected: boolean;
+      dateConsistencyCheck: boolean;
+      tamperFlags: string[];
+      officialSummary: string;
+    };
+    aphComplianceRemarks: string;
+  } | null;
 };
 
 export type TelemetryPayload = {

@@ -77,10 +77,37 @@ model Application {
   escalations   EscalationTicket[]
   evidenceFiles EvidenceFile[]
   auditLogs     AuditLog[]
+  filingDeclaration FilingDeclaration?
+  filingBrief       FilingBrief?
 
   @@index([status])
   @@index([slaStatus])
   @@index([institutionId])
+}
+
+model FilingDeclaration {
+  id                  String      @id @default(cuid())
+  applicationId       String      @unique
+  application         Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  studentIntake       Int
+  facultyCount        Int
+  builtUpAreaSqM      Int
+  totalLandAcres      Float
+  leaseExpiry         DateTime
+  fireExpiry          DateTime
+  buildingExpiry      DateTime
+  undertakingSignedOn DateTime
+  createdAt           DateTime    @default(now())
+}
+
+model FilingBrief {
+  id            String      @id @default(cuid())
+  applicationId String      @unique
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  engine        String // LLM | GROUNDED
+  model         String?
+  payload       String
+  generatedAt   DateTime    @default(now())
 }
 
 model ScrutinyRuleCheck {

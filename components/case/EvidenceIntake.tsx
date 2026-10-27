@@ -8,9 +8,10 @@ import {
   Fingerprint,
   Loader2,
   ShieldCheck,
+  Sparkles,
   Upload,
 } from "lucide-react";
-import { applyExtractionAction, confirmEvidenceTypeAction, uploadEvidenceAction, verifyEvidenceAction } from "@/app/actions";
+import { applyExtractionAction, confirmEvidenceTypeAction, runGeminiEvidenceAuditAction, uploadEvidenceAction, verifyEvidenceAction } from "@/app/actions";
 import { ActionFeedback } from "@/components/ui/ActionFeedback";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -68,6 +69,27 @@ function VerifyButton({ evidenceId }: { evidenceId: string }) {
         </button>
       </form>
       {state && <ActionFeedback state={state} className="max-w-[280px]" />}
+    </div>
+  );
+}
+
+function GeminiAuditButton({ evidenceId }: { evidenceId: string }) {
+  const [state, formAction, pending] = useActionState(runGeminiEvidenceAuditAction, null);
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <form action={formAction}>
+        <input type="hidden" name="evidenceId" value={evidenceId} />
+        <button
+          type="submit"
+          disabled={pending}
+          className="btn btn-brass btn-xs inline-flex items-center gap-1"
+          title="Run Gemini 3 Flash deep forensic scrutiny & tamper detection"
+        >
+          {pending ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />}
+          {pending ? "Auditing with Gemini…" : "Gemini AI audit"}
+        </button>
+      </form>
+      {state && <ActionFeedback state={state} className="max-w-[320px]" />}
     </div>
   );
 }
@@ -427,7 +449,10 @@ export function EvidenceIntake({
                     </td>
                     <td>
                       <div className="flex flex-col items-start gap-1.5">
-                        {canVerify && <VerifyButton evidenceId={row.id} />}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {canVerify && <VerifyButton evidenceId={row.id} />}
+                          {canVerify && <GeminiAuditButton evidenceId={row.id} />}
+                        </div>
                         <button
                           type="button"
                           onClick={() => setSelectedId(row.id)}
@@ -438,6 +463,11 @@ export function EvidenceIntake({
                         >
                           <Fingerprint size={9} />
                           {row.fields.length} field{row.fields.length === 1 ? "" : "s"}
+                          {row.geminiAudit && (
+                            <span className="ml-1 inline-flex items-center gap-0.5 font-mono text-[8px] font-semibold text-brass-700">
+                              <Sparkles size={7} /> {row.geminiAudit.forensicAudit.authenticityScore}%
+                            </span>
+                          )}
                         </button>
                       </div>
                     </td>
@@ -462,10 +492,154 @@ export function EvidenceIntake({
               <div className="eyebrow">Field-level extraction · confidence scored</div>
               <h2 className="panel-title mt-0.5 truncate">{selected.fileName}</h2>
             </div>
-            {canApply && (
-              <ApplyButton evidenceId={selected.id} disabled={!canApplySelected} />
-            )}
+            <div className="flex items-center gap-2">
+              {canVerify && <GeminiAuditButton evidenceId={selected.id} />}
+              {canApply && (
+                <ApplyButton evidenceId={selected.id} disabled={!canApplySelected} />
+              )}
+            </div>
           </div>
+
+          {selected.geminiAudit ? (
+            <div className="border-b border-slate-200 bg-navy-950 p-4 text-white">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-7 w-7 items-center justify-center border border-brass-400/40 bg-brass-500/20 text-brass-300">
+                    <Sparkles size={13} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-white">
+                        Gemini 3 Flash Forensic Scrutiny
+                      </span>
+                      <span className="border border-brass-400/30 bg-brass-400/10 px-1.5 py-0.5 font-mono text-[8px] text-brass-300">
+                        AICTE Norm Audit
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[9px] text-navy-300">
+                      Class: {selected.geminiAudit.documentTypeDetected} · Institution:{" "}
+                      {selected.geminiAudit.institutionNamed ?? "Applicant"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="text-[8px] uppercase tracking-wider text-navy-400">
+                      Authenticity Score
+                    </div>
+                    <div
+                      className={`font-serif text-lg font-bold leading-none ${
+                        selected.geminiAudit.forensicAudit.authenticityScore >= 80
+                          ? "text-emerald-400"
+                          : "text-amber-400"
+                      }`}
+                    >
+                      {selected.geminiAudit.forensicAudit.authenticityScore}/100
+                    </div>
+                  </div>
+                  <span
+                    className={`border px-2 py-1 text-[9px] font-semibold uppercase tracking-label ${
+                      selected.geminiAudit.forensicAudit.integrityRating === "VERIFIED"
+                        ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300"
+                        : selected.geminiAudit.forensicAudit.integrityRating === "TAMPER_SUSPECTED"
+                          ? "border-red-400/40 bg-red-400/10 text-red-300"
+                          : "border-amber-400/40 bg-amber-400/10 text-amber-300"
+                    }`}
+                  >
+                    {selected.geminiAudit.forensicAudit.integrityRating}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3 text-[10px]">
+                <div className="border border-white/10 bg-white/[0.03] p-2">
+                  <span className="block text-[8px] uppercase tracking-wider text-navy-400">
+                    Authority Seal
+                  </span>
+                  <span className="mt-0.5 flex items-center gap-1 font-medium text-white">
+                    {selected.geminiAudit.forensicAudit.sealDetected ? (
+                      <CheckCircle2 size={10} className="text-emerald-400" />
+                    ) : (
+                      <AlertTriangle size={10} className="text-amber-400" />
+                    )}
+                    {selected.geminiAudit.forensicAudit.sealDetected
+                      ? "Competent Seal Identified"
+                      : "No Competent Seal"}
+                  </span>
+                </div>
+                <div className="border border-white/10 bg-white/[0.03] p-2">
+                  <span className="block text-[8px] uppercase tracking-wider text-navy-400">
+                    Signatory Verification
+                  </span>
+                  <span className="mt-0.5 flex items-center gap-1 font-medium text-white">
+                    {selected.geminiAudit.forensicAudit.signatureDetected ? (
+                      <CheckCircle2 size={10} className="text-emerald-400" />
+                    ) : (
+                      <AlertTriangle size={10} className="text-amber-400" />
+                    )}
+                    {selected.geminiAudit.forensicAudit.signatureDetected
+                      ? "Authorized Signature Present"
+                      : "Missing Signatory"}
+                  </span>
+                </div>
+                <div className="border border-white/10 bg-white/[0.03] p-2">
+                  <span className="block text-[8px] uppercase tracking-wider text-navy-400">
+                    Date &amp; Expiry Consistency
+                  </span>
+                  <span className="mt-0.5 flex items-center gap-1 font-medium text-white">
+                    {selected.geminiAudit.forensicAudit.dateConsistencyCheck ? (
+                      <CheckCircle2 size={10} className="text-emerald-400" />
+                    ) : (
+                      <AlertTriangle size={10} className="text-amber-400" />
+                    )}
+                    {selected.geminiAudit.forensicAudit.dateConsistencyCheck
+                      ? "Validity Dates Verified"
+                      : "Date Anomaly Detected"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-2.5 border-t border-white/10 pt-2 text-[10px] leading-relaxed text-slate-200">
+                <span className="mb-0.5 block text-[8px] font-semibold uppercase tracking-wider text-brass-300">
+                  Forensic Scrutiny Finding:
+                </span>
+                {selected.geminiAudit.forensicAudit.officialSummary}
+              </div>
+
+              {selected.geminiAudit.forensicAudit.tamperFlags.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px] text-amber-300">
+                  <span className="font-semibold uppercase tracking-label text-amber-400">
+                    Tamper Indicators:
+                  </span>
+                  {selected.geminiAudit.forensicAudit.tamperFlags.map((flag, idx) => (
+                    <span
+                      key={idx}
+                      className="border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5"
+                    >
+                      {flag}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {selected.geminiAudit.aphComplianceRemarks && (
+                <div className="mt-2 text-[9px] italic text-navy-300">
+                  APH Note: {selected.geminiAudit.aphComplianceRemarks}
+                </div>
+              )}
+            </div>
+          ) : canVerify ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brass-300/40 bg-brass-50/60 px-4 py-2.5 text-[10px]">
+              <div className="flex items-center gap-2 text-navy-950">
+                <Sparkles size={12} className="text-brass-700" />
+                <span>
+                  Run <strong>Gemini Multi-Modal Forensic Scrutiny</strong> to verify issuing seals,
+                  signatures, altered dates, and APH norm conformity.
+                </span>
+              </div>
+              <GeminiAuditButton evidenceId={selected.id} />
+            </div>
+          ) : null}
 
           {!selected.needsReview && selected.reviewedAt && (
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-emerald-200 bg-emerald-50/60 px-4 py-2 text-[9px] text-emerald-900">
