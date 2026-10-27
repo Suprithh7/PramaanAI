@@ -48,6 +48,17 @@ export function fmtTime(value: DateLike | null | undefined): string {
   }).format(toDate(value));
 }
 
+export function fmtClock(value: DateLike | null | undefined): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: IST,
+  }).format(toDate(value));
+}
+
 export function fmtNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return new Intl.NumberFormat("en-IN").format(value);

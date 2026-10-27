@@ -1170,6 +1170,7 @@ async function main() {
   await dropImmutabilityTriggers();
 
   await prisma.auditLog.deleteMany();
+  await prisma.evidenceFile.deleteMany();
   await prisma.escalationTicket.deleteMany();
   await prisma.deficiencyTicket.deleteMany();
   await prisma.eVCInspection.deleteMany();

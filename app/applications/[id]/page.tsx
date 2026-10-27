@@ -10,6 +10,7 @@ import {
   Download,
   FileCheck2,
   FileText,
+  Fingerprint,
   GitCommitHorizontal,
   MapPin,
   Printer,
@@ -31,10 +32,12 @@ import {
   submitSiteReportAction,
 } from "@/app/actions";
 import { evaluateAphRules, aphSummary } from "@/lib/aph";
+import { getConsistencyReport } from "@/lib/consistency";
 import { checkConflict, EVC_ROSTER } from "@/lib/evc";
 import { canAcceptResubmission, canDecide, canRaiseDeficiency, canRunAph, canScheduleEvc, canSubmitSiteReport, pathHasEvc } from "@/lib/fsm";
 import { fmtDate, fmtDateTime, fmtNumber, isoDay, shortRef, truncateHash } from "@/lib/format";
 import { getCase } from "@/lib/queries";
+import { toEvidenceRow } from "@/lib/evidence";
 import { getSession } from "@/lib/session";
 import { SLA_POLICY, daysOverdue, liveDaysInStage, slaForDays, stageDeadline, stageElapsedPercent } from "@/lib/sla";
 import {
@@ -64,6 +67,7 @@ import {
 import { EmptyState, SlaMeter } from "@/components/ui/EmptyState";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CaseActionForm } from "@/components/case/CaseActionForm";
+import { EvidenceIntake } from "@/components/case/EvidenceIntake";
 import { LiveStatutoryClock } from "@/components/case/LiveStatutoryClock";
 import { WorkflowRail } from "@/components/case/WorkflowRail";
 import { DOC_TYPE_LABELS } from "@/lib/types";
@@ -75,6 +79,7 @@ const TABS = [
   { key: "aph", label: "APH matrix", icon: Scale },
   { key: "deficiency", label: "Deficiency & evidence", icon: FileCheck2 },
   { key: "evc", label: "EVC inspection", icon: ClipboardCheck },
+  { key: "evidence", label: "Evidence & integrity", icon: Fingerprint },
   { key: "ledger", label: "Audit ledger", icon: GitCommitHorizontal },
 ] as const;
 
@@ -147,6 +152,9 @@ export default async function ApplicationCasePage({
     admissions > 0 ? app.institution.builtUpAreaSqM / admissions : 0;
   const facultyRatio = app.institution.facultyCount > 0 ? admissions / app.institution.facultyCount : 0;
   const lease = app.institution.documents.find((document) => document.docType === "LEASE_DEED");
+  const evidenceRows = app.evidenceFiles.map(toEvidenceRow);
+  const evidenceTampered = evidenceRows.filter((row) => row.integrity === "TAMPERED").length;
+  const consistency = activeTab === "evidence" ? await getConsistencyReport(app.institutionId) : null;
   const roster = EVC_ROSTER.map((member) => ({
     ...member,
     conflict: checkConflict(member, app.institution),
@@ -247,9 +255,11 @@ export default async function ApplicationCasePage({
                     ? latestInspection?.siteReportStatus === "OVERDUE"
                       ? 1
                       : 0
-                    : item.key === "ledger"
-                      ? app.auditLogs.length
-                      : 0;
+                    : item.key === "evidence"
+                      ? evidenceRows.length
+                      : item.key === "ledger"
+                        ? app.auditLogs.length
+                        : 0;
             return (
               <Link
                 key={item.key}
@@ -267,7 +277,7 @@ export default async function ApplicationCasePage({
                     className={`ml-0.5 px-1 font-mono text-[8px] ${
                       active
                         ? "bg-brass-500 text-navy-950"
-                        : item.key === "aph" || item.key === "deficiency" || item.key === "evc"
+                        : item.key === "aph" || item.key === "deficiency" || item.key === "evc" || (item.key === "evidence" && evidenceTampered > 0)
                           ? "bg-red-100 text-red-800"
                           : "bg-slate-100 text-slate-600"
                     }`}
@@ -1120,6 +1130,18 @@ export default async function ApplicationCasePage({
                   )}
                 </section>
               </>
+            )}
+
+            {activeTab === "evidence" && consistency && (
+              <EvidenceIntake
+                applicationId={app.id}
+                referenceNo={app.referenceNo}
+                rows={evidenceRows}
+                report={consistency}
+                canUpload={can(role, "UPLOAD_EVIDENCE")}
+                canVerify={can(role, "VERIFY_EVIDENCE")}
+                canApply={can(role, "APPLY_EXTRACTION")}
+              />
             )}
 
             {activeTab === "ledger" && (

@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
@@ -7,6 +8,8 @@ import { redirect } from "next/navigation";
 import { evaluateAphRules, aphSummary, type AphRuleResult } from "@/lib/aph";
 import { recordAudit, verifyAuditLedger } from "@/lib/audit";
 import { prisma } from "@/lib/db";
+import { MAX_EVIDENCE_BYTES, isPdf, processEvidencePdf, rehashStored, saveEvidenceFile } from "@/lib/evidence";
+import { EVIDENCE_TYPE_LABELS, isEvidenceType, type ExtractedField } from "@/lib/evidence-types";
 import { checkConflict, findEvcMember, geofenceResult, GEOFENCE_RADIUS_M } from "@/lib/evc";
 import { canDecide, canRaiseDeficiency, canRunAph, statusAfterSiteReport } from "@/lib/fsm";
 import { fmtDate } from "@/lib/format";
@@ -1092,4 +1095,292 @@ export async function attestLedgerAction(
   return ok(
     `Ledger verified and attested: ${verification.entries} entries, hash chain intact. Attestation appended to the ledger.`,
   );
+}
+
+export async function uploadEvidenceAction(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const denied = requireCapability(session, "UPLOAD_EVIDENCE");
+  if (denied) return denied;
+
+  const applicationId = field(formData, "applicationId");
+  const declaredType = field(formData, "docType") || "AUTO";
+  const entry = formData.get("file");
+
+  if (!entry || typeof entry === "string" || typeof entry.arrayBuffer !== "function") {
+    return fail("Choose a PDF annexure to upload.");
+  }
+  const upload = entry as File;
+  if (upload.size === 0) return fail("The selected file is empty.");
+  if (upload.size > MAX_EVIDENCE_BYTES) {
+    return fail(`Evidence files must be at most ${Math.round(MAX_EVIDENCE_BYTES / (1024 * 1024))} MB.`);
+  }
+  if (!/\.pdf$/i.test(upload.name) && upload.type !== "application/pdf") {
+    return fail("Only PDF annexures are accepted.");
+  }
+
+  const app = await prisma.application.findUnique({
+    where: { id: applicationId },
+    select: { id: true, institutionId: true, referenceNo: true },
+  });
+  if (!app) return fail("Application not found.");
+  const scope = tenantError(session, app.institutionId);
+  if (scope) return fail(scope);
+
+  const bytes = new Uint8Array(await upload.arrayBuffer());
+  if (!isPdf(bytes)) return fail("The file is not a readable PDF (missing %PDF header).");
+
+  const processed = await processEvidencePdf(bytes);
+  const resolvedType =
+    declaredType !== "AUTO" && isEvidenceType(declaredType) ? declaredType : processed.detectedType;
+
+  const id = randomUUID();
+  const storagePath = await saveEvidenceFile(id, bytes);
+
+  const previous = await prisma.evidenceFile.findFirst({
+    where: { institutionId: app.institutionId, docType: resolvedType },
+    orderBy: { createdAt: "desc" },
+  });
+  const referenceMatch = previous ? previous.sha256 === processed.sha256 : null;
+  const reuseCount = await prisma.evidenceFile.count({
+    where: { sha256: processed.sha256, institutionId: { not: app.institutionId } },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.evidenceFile.create({
+      data: {
+        id,
+        applicationId: app.id,
+        institutionId: app.institutionId,
+        docType: resolvedType,
+        detectedType: processed.detectedType,
+        typeConfidence: processed.typeConfidence,
+        fileName: upload.name.slice(0, 200),
+        mimeType: upload.type || "application/pdf",
+        sizeBytes: upload.size,
+        sha256: processed.sha256,
+        storagePath,
+        textChars: processed.textChars,
+        hasTextLayer: processed.hasTextLayer,
+        extracted: processed.extractedJson,
+        integrity: "UNVERIFIED",
+        referenceMatch,
+        referenceOfId: previous?.id ?? null,
+        uploadedBy: session.user.name,
+        uploadedRole: session.role,
+      },
+    });
+    await recordAudit(
+      {
+        applicationId: app.id,
+        institutionId: app.institutionId,
+        performedBy: session.user.name,
+        role: session.role,
+        action: "EVIDENCE_UPLOADED",
+        previousState: previous ? `${previous.sha256.slice(0, 12)}…` : null,
+        newState: `${processed.sha256.slice(0, 12)}…`,
+        detail: `${EVIDENCE_TYPE_LABELS[resolvedType]} uploaded for ${app.referenceNo}. SHA-256 ${processed.sha256.slice(0, 16)}… · classifier ${processed.detectedType} at ${Math.round(processed.typeConfidence * 100)}% · ${processed.fields.length} field(s) extracted${referenceMatch === false ? " · DIGEST MISMATCH against previous version" : referenceMatch === true ? " · identical digest to previous version" : ""}${reuseCount > 0 ? ` · digest already filed by ${reuseCount} other institution(s)` : ""}.`,
+      },
+      tx,
+    );
+  });
+
+  refresh();
+  const reuseNote =
+    reuseCount > 0
+      ? ` The same digest is already on the national register under ${reuseCount} other institution${reuseCount === 1 ? "" : "s"}.`
+      : "";
+  if (!processed.hasTextLayer) {
+    return ok(
+      `${upload.name} stored and hashed. No text layer detected — confirm the document type manually.${reuseNote}`,
+    );
+  }
+  return ok(
+    `${upload.name} → ${EVIDENCE_TYPE_LABELS[resolvedType]} · ${processed.fields.length} fields extracted · digest ${processed.sha256.slice(0, 12)}….${reuseNote}`,
+  );
+}
+
+export async function verifyEvidenceAction(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const denied = requireCapability(session, "VERIFY_EVIDENCE");
+  if (denied) return denied;
+
+  const evidenceId = field(formData, "evidenceId");
+  const record = await prisma.evidenceFile.findUnique({ where: { id: evidenceId } });
+  if (!record) return fail("Evidence record not found.");
+  const scope = tenantError(session, record.institutionId);
+  if (scope) return fail(scope);
+
+  let actual: string;
+  try {
+    actual = await rehashStored(record.storagePath);
+  } catch {
+    return fail("The stored file could not be read from the evidence store.");
+  }
+
+  const match = actual === record.sha256;
+  const integrity = match ? "VERIFIED" : "TAMPERED";
+
+  await prisma.$transaction(async (tx) => {
+    await tx.evidenceFile.update({
+      where: { id: record.id },
+      data: { integrity, verifyCount: { increment: 1 }, lastVerifiedAt: new Date() },
+    });
+    await recordAudit(
+      {
+        applicationId: record.applicationId,
+        institutionId: record.institutionId,
+        performedBy: session.user.name,
+        role: session.role,
+        action: "EVIDENCE_VERIFIED",
+        previousState: record.integrity,
+        newState: integrity,
+        detail: match
+          ? `Digest recheck passed for ${record.fileName}: recomputed SHA-256 equals the stored reference (${record.sha256.slice(0, 16)}…).`
+          : `Digest mismatch for ${record.fileName}. Stored ${record.sha256.slice(0, 16)}… but the stored file now reads ${actual.slice(0, 16)}….`,
+      },
+      tx,
+    );
+  });
+
+  refresh();
+  return match
+    ? ok(`Digest matched — ${record.fileName} is intact (${record.sha256.slice(0, 12)}…).`)
+    : fail(`Digest mismatch — ${record.fileName} has changed since it was stored.`);
+}
+
+export async function confirmEvidenceTypeAction(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const denied = requireCapability(session, "VERIFY_EVIDENCE");
+  if (denied) return denied;
+
+  const evidenceId = field(formData, "evidenceId");
+  const docType = field(formData, "docType");
+  if (!isEvidenceType(docType) || docType === "OTHER") {
+    return fail("Choose the statutory document type you verified.");
+  }
+
+  const record = await prisma.evidenceFile.findUnique({ where: { id: evidenceId } });
+  if (!record) return fail("Evidence record not found.");
+  const scope = tenantError(session, record.institutionId);
+  if (scope) return fail(scope);
+
+  const previousType = record.docType;
+  await prisma.$transaction(async (tx) => {
+    await tx.evidenceFile.update({
+      where: { id: record.id },
+      data: { docType, reviewedBy: session.user.name, reviewedAt: new Date() },
+    });
+    await recordAudit(
+      {
+        applicationId: record.applicationId,
+        institutionId: record.institutionId,
+        performedBy: session.user.name,
+        role: session.role,
+        action: "EVIDENCE_TYPE_CONFIRMED",
+        previousState: previousType,
+        newState: docType,
+        detail: `${record.fileName} reviewed by ${session.user.name} and confirmed as ${EVIDENCE_TYPE_LABELS[docType]}. Classifier proposed ${record.detectedType} at ${Math.round(record.typeConfidence * 100)}%${record.hasTextLayer ? "" : " on a scanned annexure with no text layer"}.`,
+      },
+      tx,
+    );
+  });
+
+  refresh();
+  return ok(
+    `${record.fileName} reviewed and filed as ${EVIDENCE_TYPE_LABELS[docType]}. The confirmation is on the ledger.`,
+  );
+}
+
+export async function applyExtractionAction(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const denied = requireCapability(session, "APPLY_EXTRACTION");
+  if (denied) return denied;
+
+  const evidenceId = field(formData, "evidenceId");
+  const record = await prisma.evidenceFile.findUnique({ where: { id: evidenceId } });
+  if (!record) return fail("Evidence record not found.");
+  const scope = tenantError(session, record.institutionId);
+  if (scope) return fail(scope);
+  if (!record.hasTextLayer) {
+    return fail("No text layer in this annexure — nothing to apply. Enter values manually.");
+  }
+
+  let fields: ExtractedField[] = [];
+  try {
+    const parsed = JSON.parse(record.extracted) as { fields?: ExtractedField[] };
+    fields = Array.isArray(parsed.fields) ? parsed.fields : [];
+  } catch {
+    fields = [];
+  }
+
+  const updates: Prisma.InstitutionUpdateInput = {};
+  const applied: string[] = [];
+  for (const field of fields) {
+    const numeric = Number(field.value.replace(/,/g, "").trim());
+    if (!Number.isFinite(numeric)) continue;
+    switch (field.key) {
+      case "builtUpAreaSqM":
+        if (numeric >= 1000 && numeric <= 2_000_000) {
+          updates.builtUpAreaSqM = Math.round(numeric);
+          applied.push(`built-up ${Math.round(numeric).toLocaleString("en-IN")} sq m`);
+        }
+        break;
+      case "facultyCount":
+        if (numeric >= 1 && numeric <= 20_000) {
+          updates.facultyCount = Math.round(numeric);
+          applied.push(`faculty ${Math.round(numeric)}`);
+        }
+        break;
+      case "intake":
+        if (numeric >= 1 && numeric <= 100_000) {
+          updates.studentIntake = Math.round(numeric);
+          applied.push(`intake ${Math.round(numeric)}`);
+        }
+        break;
+      case "landAcres":
+        if (numeric >= 0.1 && numeric <= 10_000) {
+          updates.totalLandAcres = numeric;
+          applied.push(`land ${numeric.toFixed(2)} acres`);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return fail("No applicable numeric fields were extracted from this annexure.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.institution.update({ where: { id: record.institutionId }, data: updates });
+    await recordAudit(
+      {
+        applicationId: record.applicationId,
+        institutionId: record.institutionId,
+        performedBy: session.user.name,
+        role: session.role,
+        action: "PROFILE_UPDATED_FROM_EVIDENCE",
+        previousState: null,
+        newState: null,
+        detail: `Institution profile corrected from ${record.fileName}: ${applied.join("; ")}. Digest ${record.sha256.slice(0, 16)}….`,
+      },
+      tx,
+    );
+  });
+
+  refresh();
+  return ok(`Profile updated from ${record.fileName}: ${applied.join(", ")}.`);
 }

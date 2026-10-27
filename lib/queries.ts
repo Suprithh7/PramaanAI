@@ -32,6 +32,7 @@ export async function getCase(id: string) {
       inspections: { orderBy: { createdAt: "desc" } },
       escalations: { orderBy: { createdAt: "desc" } },
       ruleChecks: { orderBy: { ruleCode: "asc" } },
+      evidenceFiles: { orderBy: { createdAt: "desc" } },
       auditLogs: { orderBy: { sequence: "desc" }, take: 40 },
     },
   });

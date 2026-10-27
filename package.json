@@ -9,7 +9,8 @@
     "start": "next start",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
-    "db:setup": "prisma db push && prisma db seed",
+    "db:evidence": "tsx scripts/seed-evidence.ts",
+    "db:setup": "prisma db push && prisma db seed && npm run db:evidence",
     "postinstall": "prisma generate"
   },
   "prisma": {
@@ -20,7 +21,8 @@
     "lucide-react": "0.468.0",
     "next": "15.5.28",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "unpdf": "^1.9.1"
   },
   "devDependencies": {
     "@types/node": "22.15.3",

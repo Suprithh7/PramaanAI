@@ -10,4 +10,5 @@ prisma/dev.db-journal
 .DS_Store
 next-env.d.ts
 .qa/
+storage/
 tsconfig.tsbuildinfo

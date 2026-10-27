@@ -42,10 +42,11 @@ model Institution {
   longitude             Float    @default(0)
   createdAt             DateTime @default(now())
 
-  applications Application[]
-  documents    ComplianceDocument[]
-  users        User[]
-  auditLogs    AuditLog[]
+  applications  Application[]
+  documents     ComplianceDocument[]
+  evidenceFiles EvidenceFile[]
+  users         User[]
+  auditLogs     AuditLog[]
 
   @@index([region])
 }
@@ -74,6 +75,7 @@ model Application {
   inspections   EVCInspection[]
   deficiencies  DeficiencyTicket[]
   escalations   EscalationTicket[]
+  evidenceFiles EvidenceFile[]
   auditLogs     AuditLog[]
 
   @@index([status])
@@ -150,6 +152,42 @@ model ComplianceDocument {
 
   @@unique([institutionId, docType])
   @@index([status])
+}
+
+// Uploaded statutory evidence. The PDF bytes live on disk under storage/evidence;
+// sha256 is the reference digest used for integrity rechecks and version diffing.
+model EvidenceFile {
+  id             String       @id
+  applicationId  String?
+  application    Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  institutionId  String
+  institution    Institution  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  docType        String // LEASE_DEED | FIRE_SAFETY | BUILDING_PLAN | UNDERTAKING | OTHER
+  detectedType   String
+  typeConfidence Float        @default(0)
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  sha256         String
+  storagePath    String
+  textChars      Int          @default(0)
+  hasTextLayer   Boolean      @default(false)
+  extracted      String       @default("{}")
+  integrity      String       @default("UNVERIFIED") // UNVERIFIED | VERIFIED | TAMPERED
+  referenceMatch Boolean?
+  referenceOfId  String?
+  verifyCount    Int          @default(0)
+  lastVerifiedAt DateTime?
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  uploadedBy     String
+  uploadedRole   String
+  createdAt      DateTime     @default(now())
+
+  @@index([institutionId, docType])
+  @@index([applicationId])
+  @@index([integrity])
+  @@index([sha256])
 }
 
 model EscalationTicket {

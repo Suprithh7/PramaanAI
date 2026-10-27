@@ -33,6 +33,7 @@ import { fmtDate } from "@/lib/format";
 import { getLedgerIntegritySummary } from "@/lib/audit";
 import { getDocuments, getPortfolio } from "@/lib/queries";
 import { getSession } from "@/lib/session";
+import { getTelemetry } from "@/lib/telemetry";
 import { can } from "@/lib/types";
 import { REGION_META, ROLE_META, type Region } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -49,6 +50,7 @@ import { EscalationPanel } from "@/components/command/EscalationPanel";
 import { DocumentExposure } from "@/components/command/DocumentExposure";
 import { LedgerStream } from "@/components/command/LedgerStream";
 import { InspectionBoard } from "@/components/command/InspectionBoard";
+import { LivePulse } from "@/components/command/LivePulse";
 
 export const dynamic = "force-dynamic";
 
@@ -90,7 +92,7 @@ export default async function CommandCentrePage() {
   const role = session.role;
   const copy = TITLES[role];
 
-  const [portfolio, documents, integrity, recentAudit] = await Promise.all([
+  const [portfolio, documents, integrity, recentAudit, telemetry] = await Promise.all([
     getPortfolio(session),
     getDocuments(session),
     getLedgerIntegritySummary(),
@@ -103,6 +105,7 @@ export default async function CommandCentrePage() {
       take: 10,
       include: { application: { select: { referenceNo: true } } },
     }),
+    getTelemetry(session),
   ]);
 
   const active = activeApps(portfolio);
@@ -223,6 +226,15 @@ export default async function CommandCentrePage() {
       />
 
       <div className="space-y-4">
+        <LivePulse
+          initial={telemetry}
+          scopeLabel={
+            role === "INSTITUTION_ADMIN"
+              ? `Tenant · ${session.tenant?.code ?? "—"}`
+              : "All five regions · national register"
+          }
+        />
+
         {!integrity.valid && (
           <RoleBanner
             tone="red"

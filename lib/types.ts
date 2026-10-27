@@ -335,6 +335,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   LEDGER_VERIFIED: "Audit ledger verified",
   APPLICATION_RESUBMITTED: "Application resubmitted",
   IDENTITY_CONTEXT_SWITCHED: "Impersonation context switched",
+  EVIDENCE_UPLOADED: "Statutory evidence uploaded",
+  EVIDENCE_VERIFIED: "Evidence digest rechecked",
+  EVIDENCE_TYPE_CONFIRMED: "Document type confirmed",
+  PROFILE_UPDATED_FROM_EVIDENCE: "Profile corrected from evidence",
 };
 
 export function auditActionLabel(action: string): string {
@@ -353,6 +357,9 @@ export const CAPABILITIES = [
   "ACK_ESCALATION",
   "DECIDE_APPLICATION",
   "ATTEST_LEDGER",
+  "UPLOAD_EVIDENCE",
+  "VERIFY_EVIDENCE",
+  "APPLY_EXTRACTION",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -368,6 +375,9 @@ const CAPABILITY_MATRIX: Record<Capability, Role[]> = {
   ACK_ESCALATION: ["BUREAU_OFFICER", "COMPLIANCE_HEAD"],
   DECIDE_APPLICATION: ["BUREAU_OFFICER"],
   ATTEST_LEDGER: ["BUREAU_OFFICER", "COMPLIANCE_HEAD"],
+  UPLOAD_EVIDENCE: ["INSTITUTION_ADMIN"],
+  VERIFY_EVIDENCE: ["INSTITUTION_ADMIN", "REGIONAL_OFFICER", "COMPLIANCE_HEAD", "BUREAU_OFFICER"],
+  APPLY_EXTRACTION: ["INSTITUTION_ADMIN", "REGIONAL_OFFICER"],
 };
 
 export function can(role: Role, capability: Capability): boolean {
