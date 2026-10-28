@@ -1,604 +1,417 @@
 import Link from "next/link";
 import {
-  Activity,
-  AlertTriangle,
   ArrowRight,
-  CalendarClock,
-  CheckCircle2,
-  ClipboardCheck,
-  FileText,
-  Landmark,
+  BadgeCheck,
+  Building2,
+  Clock,
+  FileSearch,
+  Fingerprint,
   MapPin,
-  Scale,
-  Shield,
-  ShieldAlert,
+  ScrollText,
   ShieldCheck,
-  Timer,
-  Users,
+  Sparkles,
 } from "lucide-react";
-import { attestLedgerAction, runSlaSweepAction } from "./actions";
-import {
-  activeApps,
-  deficiencyStats,
-  documentStats,
-  escalationStats,
-  inspectionStats,
-  regionStats,
-  ruleStats,
-  slaCounts,
-  stageBuckets,
-} from "@/lib/analytics";
-import { prisma } from "@/lib/db";
-import { fmtDate } from "@/lib/format";
 import { getLedgerIntegritySummary } from "@/lib/audit";
-import { getDocuments, getPortfolio } from "@/lib/queries";
+import { activeApps, ruleStats, slaRows } from "@/lib/analytics";
+import { prisma } from "@/lib/db";
+import { getPortfolio } from "@/lib/queries";
 import { getSession } from "@/lib/session";
-import { getTelemetry } from "@/lib/telemetry";
-import { can } from "@/lib/types";
-import { REGION_META, ROLE_META, type Region } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ShowcaseRail } from "@/components/showcase/ShowcaseRail";
-import { MetricCard, MetricGrid } from "@/components/ui/MetricCard";
-import { ActionButton } from "@/components/ui/ActionFeedback";
-import { RoleBanner } from "@/components/command/RoleBanner";
-import { SlaHeatmap } from "@/components/command/SlaHeatmap";
-import { StatutoryClockBand } from "@/components/command/StatutoryClockBand";
-import { PipelinePanel } from "@/components/command/PipelinePanel";
-import { PriorityTable } from "@/components/command/PriorityTable";
-import { DeficiencyInbox } from "@/components/command/DeficiencyInbox";
-import { EscalationPanel } from "@/components/command/EscalationPanel";
-import { DocumentExposure } from "@/components/command/DocumentExposure";
-import { LedgerStream } from "@/components/command/LedgerStream";
-import { InspectionBoard } from "@/components/command/InspectionBoard";
-import { LivePulse } from "@/components/command/LivePulse";
+import { StatusBadge, SlaBadge } from "@/components/ui/Badges";
+import { shortRef } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-const TITLES: Record<string, { eyebrow: string; title: string; description: string }> = {
-  INSTITUTION_ADMIN: {
-    eyebrow: "Institutional tenant · applicant workspace",
-    title: "Institution compliance workspace",
-    description:
-      "Track live filings, respond to formal deficiencies and keep every statutory annexure current. All actions are written to the national ledger.",
+const PROBLEMS = [
+  {
+    title: "Colleges wait months for an answer",
+    body: "Files move between desks by hand. Nobody can tell a college where its application is or what is holding it up.",
   },
-  REGIONAL_OFFICER: {
-    eyebrow: "Regional office · APH scrutiny",
-    title: "Regional command centre",
-    description:
-      "Run automated APH rule evaluation, issue formal deficiency notices and constitute Expert Visit Committees within the statutory clock.",
+  {
+    title: "The same rulebook is checked by eye",
+    body: "Officers manually check faculty ratios, land area and certificate dates across thousands of pages. Mistakes and delays follow.",
   },
-  EVC_MEMBER: {
-    eyebrow: "Expert Visit Committee · field operations",
-    title: "Expert visit command",
-    description:
-      "Conduct geofenced campus inspections, verify conflict-of-interest clearance and file the committee's site report.",
+  {
+    title: "Fake or reused documents get through",
+    body: "A scanned certificate can be edited, or copied from another college, and still look valid on paper.",
   },
-  COMPLIANCE_HEAD: {
-    eyebrow: "National compliance · command centre",
-    title: "National compliance command centre",
-    description:
-      "Monitor statutory SLAs across five regions, APH compliance, document exposure and the cryptographic audit chain in one operating picture.",
-  },
-  BUREAU_OFFICER: {
-    eyebrow: "AICTE Bureau · Member Secretary's office",
-    title: "Bureau oversight command centre",
-    description:
-      "Resolve escalated cases, apply regional penalties and record final council decisions with a reasoned order.",
-  },
-};
+];
 
-export default async function CommandCentrePage() {
+const SOLUTIONS = [
+  {
+    icon: ScrollText,
+    title: "Rule checks in seconds",
+    body: "Every application is tested against the AICTE rulebook automatically. Officers see the exact rule, the declared figure and the shortfall.",
+    href: "/scrutiny",
+    link: "See an officer review",
+  },
+  {
+    icon: FileSearch,
+    title: "Pre-check before you apply",
+    body: "Colleges can enter their numbers and dates and see which rules will fail — before spending weeks on a rejected file.",
+    href: "/pre-check",
+    link: "Try the pre-check",
+  },
+  {
+    icon: Fingerprint,
+    title: "Documents that can be trusted",
+    body: "Each PDF is fingerprinted. If a certificate is edited or copied from another college, the system flags it immediately.",
+    href: "/documents",
+    link: "Open document checks",
+  },
+  {
+    icon: MapPin,
+    title: "Inspections that really happened",
+    body: "Inspectors must be inside a 750 m radius of the campus to file a report. Location, time and findings are locked together.",
+    href: "/inspections",
+    link: "See an inspection",
+  },
+  {
+    icon: ShieldCheck,
+    title: "An audit trail nobody can rewrite",
+    body: "Every action is chained to the one before it. Change a record and the chain breaks — instantly visible to auditors.",
+    href: "/audit",
+    link: "Test the audit trail",
+  },
+  {
+    icon: Clock,
+    title: "Deadlines that escalate themselves",
+    body: "Cases that cross a statutory deadline are escalated and penalised automatically, without waiting for a reminder.",
+    href: "/applications",
+    link: "See live deadlines",
+  },
+];
+
+const STEPS = [
+  {
+    title: "College files online",
+    body: "One form declares intake, faculty, land and the four mandatory certificates.",
+  },
+  {
+    title: "Rules are checked instantly",
+    body: "The system passes or flags each AICTE rule with the exact number that failed.",
+  },
+  {
+    title: "Documents are verified",
+    body: "Each annexure is fingerprinted, compared with the declared figures and cross-checked for reuse.",
+  },
+  {
+    title: "Inspector visits campus",
+    body: "An inspector files a location-stamped report; conflicts of interest are blocked before the visit.",
+  },
+  {
+    title: "Decision is recorded",
+    body: "Approval or rejection is written to a tamper-evident ledger with a printable order.",
+  },
+];
+
+export default async function DashboardPage() {
   const session = await getSession();
-  const role = session.role;
-  const copy = TITLES[role];
-
-  const [portfolio, documents, integrity, recentAudit, telemetry] = await Promise.all([
+  const [apps, institutions, documents, evidence, integrity] = await Promise.all([
     getPortfolio(session),
-    getDocuments(session),
+    prisma.institution.count(),
+    prisma.complianceDocument.count(),
+    prisma.evidenceFile.count(),
     getLedgerIntegritySummary(),
-    prisma.auditLog.findMany({
-      where:
-        role === "INSTITUTION_ADMIN" && session.tenant
-          ? { institutionId: session.tenant.id }
-          : {},
-      orderBy: { sequence: "desc" },
-      take: 10,
-      include: { application: { select: { referenceNo: true } } },
-    }),
-    getTelemetry(session),
   ]);
 
-  const active = activeApps(portfolio);
-  const sla = slaCounts(portfolio);
-  const deficiencies = deficiencyStats(portfolio);
-  const escalations = escalationStats(portfolio);
-  const inspections = inspectionStats(portfolio);
-  const docs = documentStats(documents);
-  const rules = ruleStats(portfolio);
-  const stages = stageBuckets(portfolio);
-
-  const assignedVisits = portfolio
-    .flatMap((app) => app.inspections)
-    .filter((inspection) => inspection.committeeLead === session.user.name);
-  const overdueAssigned = assignedVisits.filter(
-    (inspection) => inspection.siteReportStatus === "OVERDUE",
-  ).length;
-
-  const regionMeta = session.user.region
-    ? REGION_META[session.user.region as Region]
-    : session.tenant
-      ? REGION_META[session.tenant.region as Region]
-      : null;
-
-  const jurisdiction =
-    role === "INSTITUTION_ADMIN"
-      ? session.tenant?.name ?? "No tenant selected"
-      : role === "COMPLIANCE_HEAD"
-        ? "All five AICTE regions"
-        : role === "BUREAU_OFFICER"
-          ? "National escalation desk"
-          : role === "EVC_MEMBER"
-            ? "Committee pool · all regions"
-            : regionMeta?.label ?? "Northern Region";
-
-  const priorityTitle =
-    role === "REGIONAL_OFFICER"
-      ? "Scrutiny & EVC docket"
-      : role === "BUREAU_OFFICER"
-        ? "Bureau intervention docket"
-        : "National priority docket";
-
-  const priorityCaption =
-    role === "REGIONAL_OFFICER"
-      ? "Cases awaiting regional action, ranked by clock pressure"
-      : role === "BUREAU_OFFICER"
-        ? "Escalated and council-stage cases requiring a bureau decision"
-        : "All active filings ranked by statutory clock pressure";
+  const active = activeApps(apps);
+  const rules = ruleStats(apps);
+  const deadlines = slaRows(apps);
+  const breached = deadlines.filter((row) => row.sla === "BREACHED").length;
+  const warning = deadlines.filter((row) => row.sla === "WARNING").length;
+  const priority = deadlines.slice(0, 5);
+  const demoCase = apps.find((app) => app.id === "app_biem_mech") ?? apps[0] ?? null;
 
   return (
     <>
       <PageHeader
-        eyebrow={copy.eyebrow}
-        title={copy.title}
-        description={copy.description}
+        eyebrow="Smart India Hackathon · AICTE problem statement"
+        title="College approvals take months. PRAMAAN makes them take days."
+        description="AICTE receives thousands of college approval applications every year. Each one is checked by hand against the Approval Process Handbook — a long list of rules on faculty, land, buildings and safety certificates. PRAMAAN turns that paper chase into one transparent, auditable workflow."
+        actions={
+          <>
+            {demoCase && (
+              <Link href={`/applications/${demoCase.id}`} className="btn btn-primary">
+                <Sparkles size={13} /> Run the demo
+              </Link>
+            )}
+            <Link href="/pre-check" className="btn btn-outline">
+              <BadgeCheck size={13} /> Try pre-check
+            </Link>
+          </>
+        }
         meta={
           <>
             <span className="badge border-navy-300 bg-navy-50 text-navy-900">
-              <Shield size={9} /> {ROLE_META[role].label}
+              {institutions} colleges
             </span>
-            <span className="flex items-center gap-1 text-[10px] text-slate-600">
-              <MapPin size={10} className="text-slate-400" /> {jurisdiction}
+            <span className="badge border-slate-300 bg-white text-slate-700">
+              {documents.toLocaleString("en-IN")} statutory documents
             </span>
-            <span className="flex items-center gap-1 text-[10px] text-slate-600">
-              <CalendarClock size={10} className="text-slate-400" /> {fmtDate(new Date())} · IST
+            <span className="badge border-slate-300 bg-white text-slate-700">
+              {evidence} fingerprinted PDFs
             </span>
-            <span
-              className={`flex items-center gap-1 text-[10px] ${
-                integrity.valid ? "text-emerald-800" : "text-red-800"
-              }`}
-            >
-              {integrity.valid ? <ShieldCheck size={10} /> : <ShieldAlert size={10} />}
-              Ledger {integrity.valid ? "verified" : "integrity fault"} · {integrity.entries} entries
+            <span className="badge border-emerald-300 bg-emerald-50 text-emerald-900">
+              {integrity.valid ? "Audit trail intact" : "Audit alert"}
             </span>
-          </>
-        }
-        actions={
-          <>
-            {can(role, "RUN_SLA_SWEEP") && (
-              <ActionButton
-                action={runSlaSweepAction}
-                fields={{}}
-                label="Run SLA sweep"
-                pendingLabel="Sweeping…"
-                variant="primary"
-                icon={<Timer size={11} />}
-                confirm="Recompute every active statutory clock and auto-raise escalations for breached cases?"
-              />
-            )}
-            {can(role, "ATTEST_LEDGER") && (
-              <ActionButton
-                action={attestLedgerAction}
-                fields={{}}
-                label="Attest ledger"
-                pendingLabel="Hashing…"
-                variant="outline"
-                icon={<ShieldCheck size={11} />}
-              />
-            )}
-            {role === "INSTITUTION_ADMIN" && (
-              <Link href="/applications" className="btn btn-primary">
-                Filing register <ArrowRight size={11} />
-              </Link>
-            )}
-            {role === "EVC_MEMBER" && (
-              <Link href="/evc" className="btn btn-primary">
-                Visit console <ArrowRight size={11} />
-              </Link>
-            )}
           </>
         }
       />
 
-      <ShowcaseRail
-        activeCount={active.length}
-        breachCount={sla.BREACHED}
-        ruleRate={rules.rate}
-      />
-
-      <div className="space-y-4">
-        <LivePulse
-          initial={telemetry}
-          scopeLabel={
-            role === "INSTITUTION_ADMIN"
-              ? `Tenant · ${session.tenant?.code ?? "—"}`
-              : "All five regions · national register"
-          }
-        />
-
-        {!integrity.valid && (
-          <RoleBanner
-            tone="red"
-            eyebrow="Critical · ledger integrity"
-            title={`Hash chain broken at entry #${integrity.brokenAtSequence ?? "unknown"}`}
-            icon={<ShieldAlert size={16} />}
-            actions={
-              <Link href="/audit" className="btn btn-danger btn-xs">
-                Open audit trail
-              </Link>
-            }
-          />
-        )}
-
-        {role === "INSTITUTION_ADMIN" && deficiencies.open > 0 && (
-          <RoleBanner
-            tone={deficiencies.nearestDays !== null && deficiencies.nearestDays < 0 ? "red" : "amber"}
-            eyebrow="Action required · formal deficiency"
-            title={`${deficiencies.open} open notice${deficiencies.open === 1 ? "" : "s"} for ${session.tenant?.name ?? "this institution"}`}
-            icon={<AlertTriangle size={16} />}
-            actions={
-              <Link href="/applications" className="btn btn-danger btn-xs">
-                Respond now <ArrowRight size={10} />
-              </Link>
-            }
-          />
-        )}
-
-        {role === "COMPLIANCE_HEAD" && (
-          <RoleBanner
-            tone={sla.BREACHED > 0 ? "red" : "emerald"}
-            eyebrow="National statutory clock"
-            title={
-              sla.BREACHED > 0
-                ? `${sla.BREACHED} of ${sla.total} active cases exceed the 10-day limit`
-                : `All ${sla.total} active cases are within the 10-day statutory limit`
-            }
-            icon={sla.BREACHED > 0 ? <Activity size={16} /> : <CheckCircle2 size={16} />}
-            actions={
-              <Link href="/escalations" className="btn btn-outline btn-xs">
-                SLA matrix <ArrowRight size={10} />
-              </Link>
-            }
-          />
-        )}
-
-        {role === "BUREAU_OFFICER" && (
-          <RoleBanner
-            tone={escalations.open > 0 ? "red" : escalations.acknowledged > 0 ? "amber" : "emerald"}
-            eyebrow="Bureau escalation desk"
-            title={
-              escalations.open > 0
-                ? `${escalations.open} escalation${escalations.open === 1 ? "" : "s"} await acknowledgement`
-                : escalations.acknowledged > 0
-                  ? `${escalations.acknowledged} acknowledged escalation${escalations.acknowledged === 1 ? "" : "s"} under resolution`
-                  : "No live escalations on the national register"
-            }
-            icon={<Landmark size={16} />}
-            actions={
-              <Link href="/escalations" className="btn btn-danger btn-xs">
-                Escalation matrix <ArrowRight size={10} />
-              </Link>
-            }
-          />
-        )}
-
-        {role === "REGIONAL_OFFICER" && (
-          <RoleBanner
-            tone={sla.BREACHED > 0 ? "red" : deficiencies.open > 0 ? "amber" : "emerald"}
-            eyebrow={`${regionMeta?.label ?? "Regional"} jurisdiction`}
-            title={
-              sla.BREACHED > 0
-                ? `${sla.BREACHED} case${sla.BREACHED === 1 ? "" : "s"} breach the scrutiny clock`
-                : deficiencies.open > 0
-                  ? `${deficiencies.open} formal notice${deficiencies.open === 1 ? "" : "s"} await institutional evidence`
-                  : "Scrutiny queue is within the statutory clock"
-            }
-            icon={<Scale size={16} />}
-            actions={
-              <Link href="/scrutiny" className="btn btn-outline btn-xs">
-                Scrutiny desk <ArrowRight size={10} />
-              </Link>
-            }
-          />
-        )}
-
-        {role === "EVC_MEMBER" && (
-          <RoleBanner
-            tone={overdueAssigned > 0 ? "red" : assignedVisits.length > 0 ? "amber" : "emerald"}
-            eyebrow="Field operations · assigned committees"
-            title={
-              overdueAssigned > 0
-                ? `${overdueAssigned} assigned site report${overdueAssigned === 1 ? "" : "s"} overdue`
-                : assignedVisits.length > 0
-                  ? `${assignedVisits.length} visit${assignedVisits.length === 1 ? "" : "s"} assigned to ${session.user.name}`
-                  : "No visits assigned to this committee identity"
-            }
-            icon={<ClipboardCheck size={16} />}
-            actions={
-              <Link href="/evc" className="btn btn-primary btn-xs">
-                Open visit console <ArrowRight size={10} />
-              </Link>
-            }
-          />
-        )}
-
-        {role === "INSTITUTION_ADMIN" ? (
-          <>
-            <MetricGrid>
-              <MetricCard
-                label="Active filings"
-                value={active.length}
-                icon={<FileText size={12} />}
-                detail={`${stages.scrutiny} scrutiny · ${stages.evc} EVC · ${stages.council} council`}
-                href="/applications"
-                foot={`${session.tenant?.code ?? "Tenant"} portfolio`}
-              />
-              <MetricCard
-                label="Open deficiencies"
-                value={deficiencies.open}
-                tone={deficiencies.open > 0 ? "red" : "emerald"}
-                icon={<AlertTriangle size={12} />}
-                detail={
-                  deficiencies.nearestDays === null
-                    ? "No open evidence window"
-                    : deficiencies.nearestDays < 0
-                      ? `${Math.abs(deficiencies.nearestDays)} days overdue`
-                      : `${deficiencies.nearestDays} days to respond`
-                }
-                href="/applications"
-                foot="Formal notices"
-              />
-              <MetricCard
-                label="Under re-scrutiny"
-                value={deficiencies.resubmitted}
-                tone="amber"
-                icon={<ClipboardCheck size={12} />}
-                detail="Evidence filed, awaiting regional review"
-                href="/applications?status=RE_SCRUTINY"
-                foot={`${deficiencies.resolved} resolved notices`}
-              />
-              <MetricCard
-                label="Documents at risk"
-                value={docs.expiring + docs.expired}
-                tone={docs.expired > 0 ? "red" : docs.expiring > 0 ? "amber" : "emerald"}
-                icon={<FileText size={12} />}
-                detail={`${docs.expiring} expiring · ${docs.expired} expired`}
-                href="/compliance"
-                foot={`${docs.valid} of ${docs.total} valid`}
-              />
-              <MetricCard
-                label="SLA breaches"
-                value={sla.BREACHED}
-                tone={sla.BREACHED > 0 ? "red" : "emerald"}
-                icon={<Timer size={12} />}
-                detail={`${sla.WARNING} approaching the 10-day limit`}
-                foot={`${sla.total} active filings`}
-              />
-              <MetricCard
-                label="APH pass rate"
-                value={`${rules.rate}%`}
-                tone={rules.flagged > 0 ? "amber" : "emerald"}
-                icon={<Scale size={12} />}
-                detail={`${rules.passed} passed · ${rules.flagged} flagged`}
-                foot={`${rules.total} persisted checks`}
-              />
-            </MetricGrid>
-
-            <StatutoryClockBand apps={portfolio} />
-
-            <PriorityTable
-              apps={portfolio}
-              title="Institutional filing docket"
-              caption={`Every filing held by ${session.tenant?.name ?? "the selected tenant"}`}
-            />
-
-            <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-              <DeficiencyInbox apps={portfolio} role={role} />
-              <DocumentExposure documents={documents} national={false} />
-            </div>
-
-            <LedgerStream
-              entries={recentAudit}
-              valid={integrity.valid}
-              totalEntries={integrity.entries}
-              headHash={integrity.headHash}
-              title="Tenant audit trail"
-              limit={6}
-            />
-          </>
-        ) : role === "EVC_MEMBER" ? (
-          <>
-            <MetricGrid>
-              <MetricCard
-                label="Assigned visits"
-                value={assignedVisits.length}
-                tone="brass"
-                icon={<ClipboardCheck size={12} />}
-                detail={assignedVisits.length > 0 ? session.user.name : "No matching committee lead"}
-                href="/evc"
-                foot="Conflict-cleared committees"
-              />
-              <MetricCard
-                label="Reports overdue"
-                value={inspections.overdue}
-                tone={inspections.overdue > 0 ? "red" : "emerald"}
-                icon={<AlertTriangle size={12} />}
-                detail="Field reports past the scheduled visit"
-                href="/evc"
-                foot={`${inspections.pending} pending in pool`}
-              />
-              <MetricCard
-                label="Committee pool"
-                value={inspections.total}
-                icon={<Users size={12} />}
-                detail={`${inspections.pending} pending · ${inspections.completed} filed`}
-                href="/evc"
-                foot="All constituted visits"
-              />
-              <MetricCard
-                label="Geofence verified"
-                value={inspections.geofenceVerified}
-                tone="emerald"
-                icon={<MapPin size={12} />}
-                detail="Reports captured inside 750 m"
-                foot="Haversine campus check"
-              />
-              <MetricCard
-                label="Conflict clearances"
-                value={inspections.total - inspections.conflicts}
-                tone={inspections.conflicts > 0 ? "red" : "emerald"}
-                icon={<Scale size={12} />}
-                detail={`${inspections.conflicts} conflict${inspections.conflicts === 1 ? "" : "s"} detected`}
-                foot="Region & affiliation checks"
-              />
-              <MetricCard
-                label="Completed reports"
-                value={inspections.completed}
-                tone="navy"
-                icon={<CheckCircle2 size={12} />}
-                detail="Recommendations on file"
-                foot="Accepted into the case file"
-              />
-            </MetricGrid>
-
-            <InspectionBoard apps={portfolio} currentLead={session.user.name} limit={6} />
-
-            <div className="grid gap-4 xl:grid-cols-3 [&>*]:min-w-0">
-              <div className="min-w-0 xl:col-span-2">
-                <PriorityTable
-                  apps={portfolio.filter((app) => app.inspections.length > 0)}
-                  title="Inspection-linked cases"
-                  caption="Cases with a constituted Expert Visit Committee"
-                  onlyActive={false}
-                />
+      <section className="mb-6 overflow-hidden bg-navy-950 text-white">
+        <div className="grid gap-px bg-white/10 lg:grid-cols-3">
+          {PROBLEMS.map((problem, index) => (
+            <div key={problem.title} className="bg-navy-950 px-5 py-5">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center bg-brass-500 font-mono text-xs font-bold text-navy-950">
+                  {index + 1}
+                </span>
+                <span className="text-[11px] font-semibold uppercase tracking-label text-brass-200">
+                  The problem
+                </span>
               </div>
-              <PipelinePanel apps={portfolio} />
+              <h2 className="mt-2.5 font-serif text-lg font-semibold leading-snug">{problem.title}</h2>
+              <p className="mt-1.5 text-sm leading-relaxed text-navy-200">{problem.body}</p>
             </div>
+          ))}
+        </div>
+      </section>
 
-            <LedgerStream
-              entries={recentAudit}
-              valid={integrity.valid}
-              totalEntries={integrity.entries}
-              headHash={integrity.headHash}
-              title="Inspection audit trail"
-              limit={6}
-            />
-          </>
-        ) : (
-          <>
-            <MetricGrid>
-              <MetricCard
-                label="Active applications"
-                value={active.length}
-                icon={<FileText size={12} />}
-                detail={`${stages.scrutiny} scrutiny · ${stages.evc} EVC · ${stages.council} council`}
-                href="/applications"
-                foot={`${stages.decided} decided`}
-              />
-              <MetricCard
-                label="SLA breaches"
-                value={sla.BREACHED}
-                tone={sla.BREACHED > 0 ? "red" : "emerald"}
-                icon={<Activity size={12} />}
-                detail={`${sla.WARNING} approaching · ${sla.ON_TRACK} on track`}
-                href="/escalations"
-                foot="10-day statutory limit"
-              />
-              <MetricCard
-                label="Open deficiencies"
-                value={deficiencies.open}
-                tone={deficiencies.open > 0 ? "red" : "emerald"}
-                icon={<AlertTriangle size={12} />}
-                detail={
-                  deficiencies.nearestDays === null
-                    ? "No open evidence window"
-                    : `${deficiencies.nearestDays} days to nearest deadline`
-                }
-                href="/scrutiny"
-                foot={`${deficiencies.resubmitted} under re-scrutiny`}
-              />
-              <MetricCard
-                label="Escalation penalty"
-                value={escalations.penalty}
-                unit="pts"
-                tone={escalations.penalty > 0 ? "red" : "emerald"}
-                icon={<ShieldAlert size={12} />}
-                detail={`${escalations.open} open · ${escalations.acknowledged} acknowledged`}
-                href="/escalations"
-                foot={`${escalations.total} tickets on register`}
-              />
-              <MetricCard
-                label="EVC reports pending"
-                value={inspections.pending}
-                tone={inspections.overdue > 0 ? "amber" : "navy"}
-                icon={<ClipboardCheck size={12} />}
-                detail={`${inspections.overdue} overdue · ${inspections.completed} filed`}
-                href="/evc"
-                foot={`${inspections.geofenceVerified} geofence verified`}
-              />
-              <MetricCard
-                label="APH pass rate"
-                value={`${rules.rate}%`}
-                tone={rules.flagged > 0 ? "amber" : "emerald"}
-                icon={<Scale size={12} />}
-                detail={`${rules.passed} passed · ${rules.flagged} flagged`}
-                href="/applications"
-                foot={`${rules.total} persisted rule checks`}
-              />
-            </MetricGrid>
+      <section className="mb-8">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <div className="eyebrow">What PRAMAAN does</div>
+            <h2 className="mt-1 font-serif text-2xl font-semibold text-navy-950">
+              One system, from application to approval
+            </h2>
+          </div>
+          <p className="max-w-md text-sm text-slate-600">
+            Every claim in this prototype is live and clickable. Open any card to see it working.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {SOLUTIONS.map((solution) => {
+            const Icon = solution.icon;
+            return (
+              <Link
+                key={solution.title}
+                href={solution.href}
+                className="panel group flex flex-col p-4 transition hover:-translate-y-0.5 hover:border-navy-400 hover:shadow-panel-lift"
+              >
+                <span className="flex h-9 w-9 items-center justify-center bg-navy-50 text-navy-800">
+                  <Icon size={17} />
+                </span>
+                <h3 className="mt-3 font-serif text-lg font-semibold leading-snug text-navy-950">
+                  {solution.title}
+                </h3>
+                <p className="mt-1.5 flex-1 text-sm leading-relaxed text-slate-600">{solution.body}</p>
+                <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-navy-800 group-hover:text-brass-700">
+                  {solution.link} <ArrowRight size={12} />
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
 
-            <SlaHeatmap rows={regionStats(portfolio)} />
-
-            <StatutoryClockBand apps={portfolio} />
-
-            <div className="grid gap-4 xl:grid-cols-3 [&>*]:min-w-0">
-              <div className="min-w-0 xl:col-span-2">
-                <PriorityTable
-                  apps={portfolio}
-                  title={priorityTitle}
-                  caption={priorityCaption}
-                  href={role === "BUREAU_OFFICER" ? "/escalations" : "/scrutiny"}
-                />
+      <section className="mb-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+        <div className="panel flex flex-col">
+          <div className="panel-header">
+            <div>
+              <div className="eyebrow">Live now</div>
+              <h2 className="panel-title mt-0.5">The national queue</h2>
+            </div>
+            <Link href="/applications" className="btn btn-outline btn-xs">
+              All applications
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-px bg-slate-200 sm:grid-cols-4">
+            {[
+              { label: "Open cases", value: active.length, tone: "text-navy-950" },
+              { label: "Rules passed", value: `${rules.rate}%`, tone: "text-emerald-700" },
+              { label: "Past deadline", value: breached, tone: "text-red-700" },
+              { label: "Due soon", value: warning, tone: "text-amber-700" },
+            ].map((stat) => (
+              <div key={stat.label} className="bg-white px-4 py-4">
+                <div className={`font-serif text-3xl font-semibold leading-none ${stat.tone}`}>
+                  {stat.value}
+                </div>
+                <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-label text-slate-500">
+                  {stat.label}
+                </div>
               </div>
-              <PipelinePanel apps={portfolio} />
-            </div>
+            ))}
+          </div>
+          <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3 text-sm leading-relaxed text-slate-600">
+            {breached > 0
+              ? `${breached} case${breached === 1 ? " is" : "s are"} past the statutory deadline. The system escalates automatically and applies penalty points.`
+              : "Every open case is inside its statutory deadline."}{" "}
+            The average file still passes {rules.passed} of {rules.total} rule checks on the declared record.
+          </div>
+        </div>
 
-            <div className="grid gap-4 xl:grid-cols-3 [&>*]:min-w-0">
-              <DeficiencyInbox apps={portfolio} role={role} />
-              <EscalationPanel apps={portfolio} />
-              <DocumentExposure documents={documents} national />
+        <div className="panel overflow-hidden">
+          <div className="panel-header">
+            <div>
+              <div className="eyebrow">Watch here first</div>
+              <h2 className="panel-title mt-0.5">Cases that need attention</h2>
             </div>
+            <Link href="/scrutiny" className="btn btn-outline btn-xs">
+              Officer view
+            </Link>
+          </div>
+          {priority.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-slate-500">No open cases in this view.</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table min-w-[520px]">
+                <thead>
+                  <tr>
+                    <th>Case</th>
+                    <th>Status</th>
+                    <th>Deadline</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priority.map(({ app, days, sla }) => (
+                    <tr key={app.id}>
+                      <td>
+                        <Link href={`/applications/${app.id}`} className="block group">
+                          <div className="text-sm font-semibold text-navy-950 group-hover:text-brass-700">
+                            {app.institution.name}
+                          </div>
+                          <div className="mt-0.5 text-xs text-slate-500">
+                            {shortRef(app.referenceNo)} · {app.programName}
+                          </div>
+                        </Link>
+                      </td>
+                      <td>
+                        <StatusBadge status={app.status} />
+                      </td>
+                      <td>
+                        <SlaBadge status={sla} days={days} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
 
-            <LedgerStream
-              entries={recentAudit}
-              valid={integrity.valid}
-              totalEntries={integrity.entries}
-              headHash={integrity.headHash}
-              title="National audit ledger"
-              limit={6}
-            />
-          </>
-        )}
-      </div>
+      <section className="mb-8">
+        <div className="mb-3">
+          <div className="eyebrow">How it works</div>
+          <h2 className="mt-1 font-serif text-2xl font-semibold text-navy-950">
+            Five steps, all visible to the college
+          </h2>
+        </div>
+        <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {STEPS.map((step, index) => (
+            <li key={step.title} className="panel p-4">
+              <div className="font-mono text-xs font-semibold text-brass-700">
+                STEP {index + 1}
+              </div>
+              <div className="mt-2 font-serif text-base font-semibold text-navy-950">{step.title}</div>
+              <p className="mt-1 text-[13px] leading-relaxed text-slate-600">{step.body}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="panel overflow-hidden border-t-4 border-t-brass-500">
+        <div className="grid gap-px bg-slate-200 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+          <div className="bg-white p-5">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-brass-600" />
+              <h2 className="font-serif text-xl font-semibold text-navy-950">
+                The five-minute demo route
+              </h2>
+            </div>
+            <p className="mt-1.5 text-sm text-slate-600">
+              Follow these five clicks and you will see every core claim in this prototype.
+            </p>
+            <ol className="mt-4 space-y-2.5">
+              {[
+                {
+                  label: "A rule catches a real shortfall",
+                  detail: "Open the BIEM Mechanical case and read the failing rule with exact numbers.",
+                  href: "/applications/app_biem_mech?tab=rules",
+                },
+                {
+                  label: "A certificate copied from another college is caught",
+                  detail: "The document check compares fingerprints across all colleges.",
+                  href: "/documents",
+                },
+                {
+                  label: "An inspection that happened off-campus is blocked",
+                  detail: "Try to file a report from outside the 750 m campus radius.",
+                  href: "/inspections",
+                },
+                {
+                  label: "The audit trail detects tampering",
+                  detail: "Edit a record in the database and watch the chain break.",
+                  href: "/audit",
+                },
+                {
+                  label: "A college fixes its numbers before applying",
+                  detail: "Move the sliders and see rules turn from red to green.",
+                  href: "/pre-check",
+                },
+              ].map((item, index) => (
+                <li key={item.label}>
+                  <Link
+                    href={item.href}
+                    className="group flex items-start gap-3 border border-slate-200 px-3 py-2.5 transition hover:border-navy-400 hover:bg-navy-50/40"
+                  >
+                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center bg-navy-900 font-mono text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <span>
+                      <span className="block text-sm font-semibold text-navy-950 group-hover:text-brass-700">
+                        {item.label}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+                        {item.detail}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          </div>
+          <div className="bg-navy-950 p-5 text-white">
+            <div className="flex items-center gap-2 text-brass-300">
+              <Building2 size={15} />
+              <span className="text-[11px] font-semibold uppercase tracking-label">
+                Under the hood
+              </span>
+            </div>
+            <h3 className="mt-2 font-serif text-xl font-semibold">Built to be trusted, not guessed</h3>
+            <ul className="mt-4 space-y-3 text-sm leading-relaxed text-navy-200">
+              {[
+                "The rule engine is deterministic. The same numbers always produce the same result — no black box, no external AI service.",
+                "Documents are identified locally from their own text. Reuse is caught by comparing SHA-256 fingerprints across every college.",
+                "Inspections combine GPS radius, conflict-of-interest screening and a time-stamped site report.",
+                "Every action is appended to a hash-linked ledger protected by database triggers.",
+              ].map((item) => (
+                <li key={item} className="flex gap-2.5">
+                  <ShieldCheck size={15} className="mt-0.5 shrink-0 text-emerald-400" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-5 border-t border-white/10 pt-3 text-xs text-navy-300">
+              {integrity.entries} audit entries · chain head{" "}
+              <span className="font-mono text-brass-200">
+                {integrity.headHash ? `${integrity.headHash.slice(0, 12)}…` : "genesis"}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
     </>
   );
 }

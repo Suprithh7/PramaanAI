@@ -20,9 +20,9 @@ export function EmptyState({
       <span className="mb-3 flex h-10 w-10 items-center justify-center border border-slate-200 bg-slate-50 text-slate-400">
         {icon ?? <Inbox size={16} />}
       </span>
-      <div className="font-serif text-[15px] font-semibold text-navy-950">{title}</div>
+      <div className="font-serif text-lg font-semibold text-navy-950">{title}</div>
       {description && (
-        <p className="mt-1.5 max-w-md text-[11px] leading-relaxed text-slate-500">{description}</p>
+        <p className="mt-1.5 max-w-md text-sm leading-relaxed text-slate-500">{description}</p>
       )}
       {children && <div className="mt-4 flex flex-wrap items-center justify-center gap-2">{children}</div>}
     </div>

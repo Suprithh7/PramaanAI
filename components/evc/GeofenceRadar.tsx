@@ -67,7 +67,7 @@ export function GeofenceRadar({
   const markerX = CENTRE + markerR * Math.sin(bearingRad);
   const markerY = CENTRE - markerR * Math.cos(bearingRad);
 
-  const toneRing = fix.verified ? "#059669" : "#dc2626";
+  const toneRing = !hasFix ? "#94a3b8" : fix.verified ? "#059669" : "#dc2626";
   const toneMarker = fix.verified ? "#047857" : "#b91c1c";
 
   const size = compact ? 176 : VIEW;
@@ -177,7 +177,7 @@ export function GeofenceRadar({
           </span>
           <span className="font-mono">{GEOFENCE_RADIUS_M} m fence</span>
         </div>
-        <div className="flex items-center gap-1 text-[9px] text-slate-600">
+        <div className="flex items-center gap-1 text-11px text-slate-600">
           <Navigation size={9} className={fix.verified ? "text-emerald-600" : "text-red-600"} />
           {!hasFix ? (
             <span className="text-slate-500">No field-device fix recorded yet.</span>

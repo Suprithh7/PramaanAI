@@ -97,7 +97,7 @@ function TextField({
         autoComplete="off"
         className="input"
       />
-      {hint && <p className="mt-1 text-[9px] leading-snug text-slate-500">{hint}</p>}
+      {hint && <p className="mt-1 text-11px leading-snug text-slate-500">{hint}</p>}
     </div>
   );
 }
@@ -187,7 +187,7 @@ export function FileApplicationForm({
         >
           <div className="mb-2 flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
             <span className="eyebrow">A · Application particulars</span>
-            <span className="font-mono text-[9px] text-slate-400">{series}####</span>
+            <span className="font-mono text-11px text-slate-400">{series}####</span>
           </div>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <TextField
@@ -219,7 +219,7 @@ export function FileApplicationForm({
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-[9px] leading-snug text-slate-500">
+              <p className="mt-1 text-11px leading-snug text-slate-500">
                 New Institute filings add the APH-107 land test.
               </p>
             </div>
@@ -227,7 +227,7 @@ export function FileApplicationForm({
 
           <div className="mb-2 mt-4 flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
             <span className="eyebrow">B · Declared capacity</span>
-            <span className="text-[9px] text-slate-500">Drives APH-101, APH-102 and APH-107</span>
+            <span className="text-11px text-slate-500">Drives APH-101, APH-102 and APH-107</span>
           </div>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <TextField
@@ -278,7 +278,7 @@ export function FileApplicationForm({
 
           <div className="mb-2 mt-4 flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
             <span className="eyebrow">C · Statutory validity dates</span>
-            <span className="text-[9px] text-slate-500">Drives APH-103 to APH-105</span>
+            <span className="text-11px text-slate-500">Drives APH-103 to APH-105</span>
           </div>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <TextField
@@ -330,7 +330,7 @@ export function FileApplicationForm({
               placeholder="Optional context for the regional office — revised laboratory block, faculty recruitment drive, prior reference."
               className="textarea"
             />
-            <p className="mt-1 text-[9px] leading-snug text-slate-500">
+            <p className="mt-1 text-11px leading-snug text-slate-500">
               Recorded against the filing. The filing event is appended to the audit ledger.
             </p>
           </div>
@@ -389,7 +389,7 @@ export function FileApplicationForm({
                   return (
                     <li key={rule.ruleCode} className="px-3 py-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[9px] font-semibold text-navy-900">
+                        <span className="font-mono text-11px font-semibold text-navy-900">
                           {rule.ruleCode}
                         </span>
                         <span
@@ -403,15 +403,15 @@ export function FileApplicationForm({
                           {passed ? "Pass" : "Flagged"}
                         </span>
                       </div>
-                      <div className="mt-0.5 text-[9px] font-medium text-navy-950">{rule.ruleName}</div>
-                      <div className="mt-0.5 font-mono text-[8px] leading-snug text-slate-500">
+                      <div className="mt-0.5 text-11px font-medium text-navy-950">{rule.ruleName}</div>
+                      <div className="mt-0.5 font-mono text-10px leading-snug text-slate-500">
                         {rule.submittedValue}
                       </div>
                     </li>
                   );
                 })}
               </ul>
-              <div className="border-t border-slate-200 bg-slate-50/70 px-3 py-2 text-[8px] leading-relaxed text-slate-500">
+              <div className="border-t border-slate-200 bg-slate-50/70 px-3 py-2 text-10px leading-relaxed text-slate-500">
                 Projection uses the declared figures above. Filing persists this matrix against the
                 case.
               </div>
@@ -421,14 +421,14 @@ export function FileApplicationForm({
               <div className="flex items-start gap-2">
                 <Scale size={14} className="mt-0.5 text-slate-400" />
                 <div>
-                  <div className="text-[10px] font-semibold text-navy-900">No projection yet</div>
-                  <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
+                  <div className="text-xs font-semibold text-navy-900">No projection yet</div>
+                  <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
                     Enter the declared capacity and all four statutory dates. The six core APH rules
                     evaluate instantly; APH-107 appears when New Institute is selected.
                   </p>
                 </div>
               </div>
-              <ul className="mt-3 space-y-1.5 text-[9px] text-slate-500">
+              <ul className="mt-3 space-y-1.5 text-11px text-slate-500">
                 <li>· Faculty–student ratio (1:15 ceiling)</li>
                 <li>· Built-up area per student (10 sqm floor)</li>
                 <li>· Lease tenure (30 unexpired years)</li>
@@ -446,9 +446,9 @@ export function FileApplicationForm({
             </div>
             <Sparkles size={13} className="text-brass-600" />
           </div>
-          <ol className="space-y-2 px-4 py-3 text-[10px] leading-relaxed text-slate-600">
+          <ol className="space-y-2 px-4 py-3 text-xs leading-relaxed text-slate-600">
             <li>
-              <span className="font-mono text-[9px] text-brass-700">{series}####</span> allocated in
+              <span className="font-mono text-11px text-brass-700">{series}####</span> allocated in
               the {regionLabel} series.
             </li>
             <li>Declared declaration stored against the case in Submitted status.</li>
@@ -461,8 +461,8 @@ export function FileApplicationForm({
               values.
             </li>
             <li>
-              <span className="font-mono text-[9px] text-slate-700">APPLICATION_FILED</span> and{" "}
-              <span className="font-mono text-[9px] text-slate-700">FILING_BRIEF_GENERATED</span>{" "}
+              <span className="font-mono text-11px text-slate-700">APPLICATION_FILED</span> and{" "}
+              <span className="font-mono text-11px text-slate-700">FILING_BRIEF_GENERATED</span>{" "}
               appended to the hash-chained ledger.
             </li>
           </ol>

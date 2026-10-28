@@ -59,13 +59,13 @@ export function MetricCard({
       <div className="mt-2.5 flex items-end gap-1.5">
         <div className="kpi-value">{value}</div>
         {unit && (
-          <span className="pb-1 text-3xs font-semibold uppercase tracking-label text-slate-500">
+          <span className="pb-1 text-[11px] font-semibold uppercase tracking-label text-slate-500">
             {unitFor(value, unit)}
           </span>
         )}
       </div>
-      {detail && <div className="mt-2 text-[10px] leading-snug text-slate-600">{detail}</div>}
-      {foot && <div className="mt-2.5 border-t border-slate-100 pt-2 text-[9px] text-slate-500">{foot}</div>}
+      {detail && <div className="mt-2 text-xs leading-snug text-slate-600">{detail}</div>}
+      {foot && <div className="mt-2.5 border-t border-slate-100 pt-2 text-[11px] text-slate-500">{foot}</div>}
     </div>
   );
 

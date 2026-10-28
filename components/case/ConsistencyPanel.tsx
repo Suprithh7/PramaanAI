@@ -41,7 +41,7 @@ export function ConsistencyPanel({
           </div>
           <h2 className="panel-title mt-0.5">Consistency findings</h2>
         </div>
-        <div className="flex flex-wrap items-center gap-2.5 font-mono text-[9px] uppercase tracking-label">
+        <div className="flex flex-wrap items-center gap-2.5 font-mono text-11px uppercase tracking-label">
           <span className="text-slate-500">{report.checksRun} checks</span>
           {report.high > 0 && <span className="font-semibold text-red-700">{report.high} high</span>}
           {report.medium > 0 && <span className="font-semibold text-amber-700">{report.medium} medium</span>}
@@ -50,7 +50,7 @@ export function ConsistencyPanel({
       </div>
 
       {report.findings.length === 0 ? (
-        <div className="flex items-center gap-1.5 border-b border-emerald-200 bg-emerald-50 px-4 py-2.5 text-[10px] text-emerald-900">
+        <div className="flex items-center gap-1.5 border-b border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-900">
           <ShieldCheck size={11} />
           No digest reuse, profile conflict or validity mismatch detected across {report.annexures} annexure
           {report.annexures === 1 ? "" : "s"}.
@@ -70,9 +70,9 @@ export function ConsistencyPanel({
                       {meta.icon}
                       {meta.label}
                     </span>
-                    <span className="text-[10px] font-semibold text-navy-950">{finding.title}</span>
+                    <span className="text-xs font-semibold text-navy-950">{finding.title}</span>
                   </div>
-                  <p className="mt-1 max-w-[820px] text-[9px] leading-relaxed text-slate-600">
+                  <p className="mt-1 max-w-[820px] text-11px leading-relaxed text-slate-600">
                     {finding.detail}
                   </p>
                 </div>
@@ -91,7 +91,7 @@ export function ConsistencyPanel({
         </ul>
       )}
 
-      <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-1.5 text-[8px] font-mono uppercase tracking-label text-slate-400">
+      <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-1.5 text-10px font-mono uppercase tracking-label text-slate-400">
         {report.annexures} annexures · statutory register · cross-institution digest index · computed{" "}
         {fmtTime(report.generatedAt)} IST
       </div>

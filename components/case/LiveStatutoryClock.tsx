@@ -86,10 +86,10 @@ export function LiveStatutoryClock({
   if (variant === "compact") {
     return (
       <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1 text-[8px] uppercase tracking-label text-slate-500">
+        <span className="flex items-center gap-1 text-10px uppercase tracking-label text-slate-500">
           <Timer size={9} /> {overdue ? "Overdue by" : "Deadline in"}
         </span>
-        <span className={`font-mono text-[11px] font-semibold tabular-nums ${tone.text}`}>
+        <span className={`font-mono text-sm font-semibold tabular-nums ${tone.text}`}>
           {ticking}
         </span>
       </div>
@@ -116,14 +116,14 @@ export function LiveStatutoryClock({
       <div className="p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <div className="text-[9px] font-semibold uppercase tracking-label text-slate-500">
+            <div className="text-11px font-semibold uppercase tracking-label text-slate-500">
               {overdue ? "Statutory deadline exceeded by" : "Statutory deadline in"}
             </div>
             <div className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums text-navy-950 sm:text-[32px]">
               {ticking}
             </div>
           </div>
-          <div className="space-y-0.5 text-right text-[9px] text-slate-500">
+          <div className="space-y-0.5 text-right text-11px text-slate-500">
             <div>
               Stage entered <span className="font-mono text-slate-600">{enteredLabel}</span>
             </div>
@@ -144,7 +144,7 @@ export function LiveStatutoryClock({
             style={{ left: `${(warningAtDays / deadlineDays) * 100}%` }}
           />
         </div>
-        <div className="mt-1.5 flex justify-between font-mono text-[8px] uppercase tracking-label text-slate-400">
+        <div className="mt-1.5 flex justify-between font-mono text-10px uppercase tracking-label text-slate-400">
           <span>0d</span>
           <span className="text-amber-600">{warningAtDays}d warn</span>
           <span className="text-red-600">{deadlineDays}d limit</span>

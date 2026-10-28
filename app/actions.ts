@@ -16,14 +16,7 @@ import {
 } from "@/lib/aph";
 import { recordAudit, verifyAuditLedger } from "@/lib/audit";
 import { prisma } from "@/lib/db";
-import { MAX_EVIDENCE_BYTES, isPdf, processEvidencePdf, readEvidenceFile, rehashStored, saveEvidenceFile } from "@/lib/evidence";
-import {
-  analyzeDocumentWithGemini,
-  generateAicteDeficiencyNotice,
-  generateAicteRemediationRoadmap,
-  evaluateEvcInspectionWithGemini,
-} from "@/lib/gemini";
-import { extractText, getDocumentProxy } from "unpdf";
+import { MAX_EVIDENCE_BYTES, isPdf, processEvidencePdf, rehashStored, saveEvidenceFile } from "@/lib/evidence";
 import { EVIDENCE_TYPE_LABELS, isEvidenceType, type ExtractedField } from "@/lib/evidence-types";
 import { checkConflict, findEvcMember, geofenceResult, GEOFENCE_RADIUS_M } from "@/lib/evc";
 import { canDecide, canRaiseDeficiency, canRunAph, statusAfterSiteReport } from "@/lib/fsm";
@@ -343,7 +336,7 @@ export async function fileApplicationAction(
         action: "FILING_BRIEF_GENERATED",
         previousState: "SUBMITTED",
         newState: "SUBMITTED",
-        detail: `${brief.engine === "LLM" ? `${brief.model} model` : "Grounded rule engine"} produced the ${brief.payload.riskLevel.toLowerCase()} filing brief at ${brief.payload.readinessScore}% readiness (${brief.payload.findings.length} finding(s)).`,
+        detail: `The rule engine produced the ${brief.payload.riskLevel.toLowerCase()} filing brief at ${brief.payload.readinessScore}% readiness (${brief.payload.findings.length} finding(s)).`,
       },
       tx,
     );
@@ -406,7 +399,7 @@ export async function regenerateFilingBriefAction(
         action: "FILING_BRIEF_GENERATED",
         previousState: application.status,
         newState: application.status,
-        detail: `Brief regenerated from the live APH matrix by ${brief.engine === "LLM" ? `${brief.model} model` : "the grounded rule engine"}: ${brief.payload.riskLevel.toLowerCase()} risk, ${brief.payload.readinessScore}% readiness, ${brief.payload.findings.length} finding(s).`,
+        detail: `Brief regenerated from the live rule engine: ${brief.payload.riskLevel.toLowerCase()} risk, ${brief.payload.readinessScore}% readiness, ${brief.payload.findings.length} finding(s).`,
       },
       tx,
     );
@@ -1671,219 +1664,4 @@ export async function applyExtractionAction(
 
   refresh();
   return ok(`Profile updated from ${record.fileName}: ${applied.join(", ")}.`);
-}
-
-
-export async function runGeminiEvidenceAuditAction(
-  _prev: ActionResult | null,
-  formData: FormData,
-): Promise<ActionResult> {
-  const session = await getSession();
-  const denied = requireCapability(session, "VERIFY_EVIDENCE");
-  if (denied) return denied;
-
-  const evidenceId = field(formData, "evidenceId");
-  const record = await prisma.evidenceFile.findUnique({
-    where: { id: evidenceId },
-    include: { institution: true, application: true },
-  });
-  if (!record) return fail("Evidence record not found.");
-  const scope = tenantError(session, record.institutionId);
-  if (scope) return fail(scope);
-
-  let rawText = "";
-  try {
-    const bytes = await readEvidenceFile(record.storagePath);
-    const pdf = await getDocumentProxy(new Uint8Array(bytes));
-    const extracted = (await extractText(pdf, { mergePages: true })) as { text: string | string[] };
-    rawText = Array.isArray(extracted.text) ? extracted.text.join("\n") : extracted.text;
-  } catch (err) {
-    return fail(`Could not extract text layer for forensic AI analysis: ${err instanceof Error ? err.message : "PDF error"}`);
-  }
-
-  const analysis = await analyzeDocumentWithGemini({
-    fileName: record.fileName,
-    docType: record.docType,
-    rawText: rawText || record.fileName,
-    institutionName: record.institution.name,
-  });
-
-  if (!analysis) {
-    return fail("Gemini Forensic Engine timeout or parse error. Please retry.");
-  }
-
-  let existingExtracted: Record<string, unknown> = {};
-  try {
-    existingExtracted = JSON.parse(record.extracted);
-  } catch {
-    existingExtracted = {};
-  }
-
-  const updatedExtracted = {
-    ...existingExtracted,
-    geminiAudit: analysis,
-    auditedAt: new Date().toISOString(),
-  };
-
-  const newIntegrity =
-    analysis.forensicAudit.integrityRating === "VERIFIED"
-      ? "VERIFIED"
-      : analysis.forensicAudit.integrityRating === "TAMPER_SUSPECTED"
-        ? "TAMPERED"
-        : record.integrity;
-
-  await prisma.$transaction(async (tx) => {
-    await tx.evidenceFile.update({
-      where: { id: record.id },
-      data: {
-        extracted: JSON.stringify(updatedExtracted),
-        integrity: newIntegrity,
-        reviewedBy: `Gemini Forensic AI (supervised by ${session.user.name})`,
-        reviewedAt: new Date(),
-      },
-    });
-
-    await recordAudit(
-      {
-        applicationId: record.applicationId,
-        institutionId: record.institutionId,
-        performedBy: session.user.name,
-        role: session.role,
-        action: "AI_FORENSIC_SCRUTINY_EXECUTED",
-        previousState: record.integrity,
-        newState: newIntegrity,
-        detail: `Gemini 3 Flash forensic audit for ${record.fileName}: Authenticity Score ${analysis.forensicAudit.authenticityScore}/100 · Rating: ${analysis.forensicAudit.integrityRating} · Seal: ${analysis.forensicAudit.sealDetected ? "YES" : "NO"} · Signature: ${analysis.forensicAudit.signatureDetected ? "YES" : "NO"} · Flags: ${analysis.forensicAudit.tamperFlags.join(", ") || "None"} · Summary: ${analysis.forensicAudit.officialSummary.slice(0, 200)}`,
-      },
-      tx,
-    );
-  });
-
-  refresh();
-  return ok(
-    `Gemini Forensic Scrutiny complete: Authenticity ${analysis.forensicAudit.authenticityScore}% (${analysis.forensicAudit.integrityRating}). ${analysis.forensicAudit.officialSummary}`,
-  );
-}
-
-export async function draftAiDeficiencyAction(
-  applicationId: string,
-): Promise<{ ok: boolean; noticeText?: string; clausesCited?: string[]; error?: string }> {
-  const session = await getSession();
-  if (!can(session.role, "RAISE_DEFICIENCY")) {
-    return { ok: false, error: "Unauthorized: only Regional and Bureau Officers can draft deficiency notices." };
-  }
-
-  const app = await prisma.application.findUnique({
-    where: { id: applicationId },
-    include: {
-      institution: { include: { documents: true } },
-      filingDeclaration: true,
-    },
-  });
-  if (!app) return { ok: false, error: "Application not found." };
-
-  const aphInput = aphInputFor(app);
-  const liveRules = evaluateAphRules(aphInput);
-  const flagged = liveRules.filter((r) => r.status !== "PASSED");
-
-  if (flagged.length === 0) {
-    return {
-      ok: false,
-      error: "All live APH rules are currently satisfied. No deficiency notice is required.",
-    };
-  }
-
-  const declaration = app.filingDeclaration;
-  const admissions = declaration?.studentIntake ?? app.institution.studentIntake;
-  const facultyCount = declaration?.facultyCount ?? app.institution.facultyCount;
-
-  const result = await generateAicteDeficiencyNotice({
-    referenceNo: app.referenceNo,
-    institutionName: app.institution.name,
-    programName: app.programName,
-    flaggedRules: flagged,
-    admissions,
-    facultyCount,
-  });
-
-  if (!result) {
-    return { ok: false, error: "Gemini failed to generate draft notice." };
-  }
-
-  return {
-    ok: true,
-    noticeText: result.noticeText,
-    clausesCited: result.clausesCited,
-  };
-}
-
-export async function generateAiRemediationAction(
-  applicationId: string,
-): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  const app = await prisma.application.findUnique({
-    where: { id: applicationId },
-    include: {
-      institution: { include: { documents: true } },
-      filingDeclaration: true,
-    },
-  });
-  if (!app) return { ok: false, error: "Application not found." };
-
-  const aphInput = aphInputFor(app);
-  const liveRules = evaluateAphRules(aphInput);
-  const flagged = liveRules.filter((r) => r.status !== "PASSED");
-
-  const declaration = app.filingDeclaration;
-  const admissions = declaration?.studentIntake ?? app.institution.studentIntake;
-  const facultyCount = declaration?.facultyCount ?? app.institution.facultyCount;
-  const builtUpArea = declaration?.builtUpAreaSqM ?? app.institution.builtUpAreaSqM;
-
-  const result = await generateAicteRemediationRoadmap({
-    referenceNo: app.referenceNo,
-    institutionName: app.institution.name,
-    programName: app.programName,
-    flaggedRules: flagged,
-    admissions,
-    facultyCount,
-    builtUpArea,
-  });
-
-  if (!result) {
-    return { ok: false, error: "Gemini failed to generate remediation roadmap." };
-  }
-
-  return { ok: true, data: result };
-}
-
-export async function evaluateAiInspectionAction(
-  inspectionId: string,
-  siteObservations: string,
-): Promise<{ ok: boolean; evaluation?: unknown; error?: string }> {
-  const inspection = await prisma.eVCInspection.findUnique({
-    where: { id: inspectionId },
-    include: {
-      application: { include: { institution: true, filingDeclaration: true } },
-    },
-  });
-  if (!inspection) return { ok: false, error: "Inspection record not found." };
-
-  const declaration = inspection.application.filingDeclaration;
-  const intake = declaration?.studentIntake ?? inspection.application.institution.studentIntake;
-  const faculty = declaration?.facultyCount ?? inspection.application.institution.facultyCount;
-  const builtUp = declaration?.builtUpAreaSqM ?? inspection.application.institution.builtUpAreaSqM;
-
-  const evaluation = await evaluateEvcInspectionWithGemini({
-    committeeLead: inspection.committeeLead,
-    institutionName: inspection.application.institution.name,
-    declaredIntake: intake,
-    declaredFaculty: faculty,
-    declaredBuiltUpSqM: builtUp,
-    geofenceDistanceM: inspection.geofenceDistanceM ?? 0,
-    siteObservations,
-  });
-
-  if (!evaluation) {
-    return { ok: false, error: "Gemini failed to evaluate site observations." };
-  }
-
-  return { ok: true, evaluation };
 }

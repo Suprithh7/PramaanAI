@@ -59,7 +59,7 @@ export function CaseActionForm({
         if (confirm && !window.confirm(confirm)) event.preventDefault();
       }}
     >
-      {description && <p className="text-[10px] leading-relaxed text-slate-600">{description}</p>}
+      {description && <p className="text-xs leading-relaxed text-slate-600">{description}</p>}
       {Object.entries(hidden).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={String(value)} />
       ))}
@@ -120,7 +120,7 @@ export function CaseActionForm({
                   className="input"
                 />
               )}
-              {field.hint && <p className="mt-1 text-[9px] leading-snug text-slate-500">{field.hint}</p>}
+              {field.hint && <p className="mt-1 text-11px leading-snug text-slate-500">{field.hint}</p>}
             </div>
           );
         })}

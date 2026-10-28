@@ -61,15 +61,15 @@ export function WorkflowRail({ status, path }: { status: string; path: string })
                   {style.icon}
                 </span>
                 <span
-                  className={`text-[9px] font-semibold uppercase tracking-label ${
+                  className={`text-11px font-semibold uppercase tracking-label ${
                     stage.state === "CURRENT" ? "text-navy-950" : "text-slate-500"
                   }`}
                 >
                   {stage.label}
                 </span>
               </div>
-              <p className={`mt-1 line-clamp-2 text-[9px] leading-snug ${style.caption}`}>{stage.caption}</p>
-              <p className="mt-1 text-[8px] uppercase tracking-label text-slate-400">{style.tag}</p>
+              <p className={`mt-1 line-clamp-2 text-11px leading-snug ${style.caption}`}>{stage.caption}</p>
+              <p className="mt-1 text-10px uppercase tracking-label text-slate-400">{style.tag}</p>
             </div>
           </li>
         );

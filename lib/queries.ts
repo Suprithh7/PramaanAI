@@ -51,6 +51,31 @@ export async function getDocuments(session: Session) {
   });
 }
 
+export async function getEvidenceReuse() {
+  const files = await prisma.evidenceFile.findMany({
+    select: {
+      fileName: true,
+      sha256: true,
+      docType: true,
+      institution: { select: { id: true, name: true, code: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  const groups = new Map<string, typeof files>();
+  for (const file of files) {
+    const group = groups.get(file.sha256) ?? [];
+    group.push(file);
+    groups.set(file.sha256, group);
+  }
+  return [...groups.entries()]
+    .map(([sha256, group]) => ({
+      sha256,
+      files: group,
+      institutions: [...new Map(group.map((file) => [file.institution.id, file.institution])).values()],
+    }))
+    .filter((entry) => entry.institutions.length > 1);
+}
+
 export type PortfolioApp = Awaited<ReturnType<typeof getPortfolio>>[number];
 export type CaseApp = NonNullable<Awaited<ReturnType<typeof getCase>>>;
 

@@ -70,7 +70,7 @@ export default async function DeficiencyNoticePage({
   return (
     <div className="print-reset mx-auto max-w-[860px]">
       <div className="no-print mb-3 flex flex-wrap items-center justify-between gap-2">
-        <Link href={`/applications/${app.id}?tab=deficiency`} className="btn btn-outline btn-xs">
+        <Link href={`/applications/${app.id}`} className="btn btn-outline btn-xs">
           <ArrowLeft size={10} /> Back to case
         </Link>
         <div className="flex items-center gap-2">

@@ -18,7 +18,7 @@ export function ActionFeedback({
     <div
       role="status"
       aria-live="polite"
-      className={`flex items-start gap-1.5 border px-2 py-1.5 text-[10px] leading-snug ${
+      className={`flex items-start gap-1.5 border px-2.5 py-1.5 text-xs leading-snug ${
         success
           ? "border-emerald-300 bg-emerald-50 text-emerald-900"
           : "border-red-300 bg-red-50 text-red-900"

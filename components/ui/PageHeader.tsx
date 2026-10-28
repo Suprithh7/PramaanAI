@@ -5,7 +5,7 @@ export type Crumb = { label: string; href?: string };
 
 export function Breadcrumbs({ items }: { items: Crumb[] }) {
   return (
-    <nav aria-label="Breadcrumb" className="mb-3 flex flex-wrap items-center gap-1.5 text-3xs text-slate-500">
+    <nav aria-label="Breadcrumb" className="mb-3 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
       <Link href="/" className="inline-flex items-center gap-1 transition hover:text-navy-800">
         <Home size={10} />
         <span className="sr-only">Home</span>
@@ -50,13 +50,13 @@ export function PageHeader({
             <span className="h-px w-5 shrink-0 bg-brass-500" />
             <span className="eyebrow text-slate-600">{eyebrow}</span>
           </div>
-          <h1 className="mt-2 font-serif text-[26px] font-semibold leading-[1.08] tracking-[-0.015em] text-navy-950 sm:text-[30px]">
+          <h1 className="mt-2 font-serif text-[30px] font-semibold leading-[1.08] tracking-[-0.015em] text-navy-950 sm:text-[36px]">
             {title}
           </h1>
           {description && (
-            <p className="mt-2 max-w-3xl text-[12.5px] leading-6 text-slate-600">{description}</p>
+            <p className="mt-2 max-w-3xl text-[15px] leading-7 text-slate-600">{description}</p>
           )}
-          {meta && <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">{meta}</div>}
+          {meta && <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">{meta}</div>}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
