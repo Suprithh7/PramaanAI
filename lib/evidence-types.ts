@@ -48,15 +48,6 @@ export type ExtractedField = {
   key: EvidenceFieldKey;
   label: string;
   value: string;
-  confidence: number;
-  snippet: string;
-};
-
-export type ExtractionResult = {
-  fields: ExtractedField[];
-  textChars: number;
-  hasTextLayer: boolean;
-  note: string | null;
 };
 
 export type EvidenceIntegrity = "UNVERIFIED" | "VERIFIED" | "TAMPERED";
@@ -65,16 +56,15 @@ export const EVIDENCE_INTEGRITY_META: Record<
   EvidenceIntegrity,
   { label: string; tone: string }
 > = {
-  UNVERIFIED: { label: "Awaiting recheck", tone: "border-slate-300 bg-slate-50 text-slate-700" },
-  VERIFIED: { label: "Digest verified", tone: "border-emerald-300 bg-emerald-50 text-emerald-900" },
-  TAMPERED: { label: "Digest mismatch", tone: "border-red-300 bg-red-50 text-red-900" },
+  UNVERIFIED: { label: "Not yet checked", tone: "border-slate-300 bg-slate-50 text-slate-700" },
+  VERIFIED: { label: "Original file", tone: "border-emerald-300 bg-emerald-50 text-emerald-900" },
+  TAMPERED: { label: "File changed", tone: "border-red-300 bg-red-50 text-red-900" },
 };
 
 export type EvidenceRow = {
   id: string;
   docType: EvidenceType;
   detectedType: EvidenceType;
-  typeConfidence: number;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -91,33 +81,9 @@ export type EvidenceRow = {
   createdAt: string;
   fields: ExtractedField[];
   note: string | null;
-  drivers: ClassifierDriver[];
-  runnerUp: { type: string; probability: number } | null;
   needsReview: boolean;
   reviewedBy: string | null;
   reviewedAt: string | null;
-};
-
-export type TelemetryPayload = {
-  serverTime: string;
-  activeCases: number;
-  breaches: number;
-  openDeficiencies: number;
-  openEscalations: number;
-  evidenceFiles: number;
-  evidenceVerified: number;
-  evidenceTampered: number;
-  ledgerEntries: number;
-  ledgerValid: boolean;
-  ledgerHead: string | null;
-  recent: Array<{
-    id: string;
-    sequence: number;
-    action: string;
-    performedBy: string;
-    detail: string | null;
-    timestamp: string;
-  }>;
 };
 
 export type ConsistencySeverity = "HIGH" | "MEDIUM" | "INFO";
@@ -147,17 +113,4 @@ export type ConsistencyReport = {
   medium: number;
   info: number;
   generatedAt: string;
-};
-
-export type ClassifierDriver = {
-  token: string;
-  weight: number;
-};
-
-export type ClassifierExplanation = {
-  type: EvidenceType;
-  confidence: number;
-  drivers: ClassifierDriver[];
-  runnerUp: { type: string; probability: number } | null;
-  needsReview: boolean;
 };

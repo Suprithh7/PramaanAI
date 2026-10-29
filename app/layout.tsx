@@ -65,11 +65,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 PRAMAAN · built for AICTE · every action is recorded
               </span>
               <span className="flex flex-wrap items-center gap-2 font-mono">
-                <span>Audit chain</span>
+                <span>Audit record</span>
                 <span className="text-slate-300">|</span>
                 <span>{integrity.entries} entries</span>
                 <span className="text-slate-300">|</span>
-                <span>head {integrity.headHash ? truncateHash(integrity.headHash, 8, 6) : "genesis"}</span>
+                <span>latest code {integrity.headHash ? truncateHash(integrity.headHash, 8, 6) : "genesis"}</span>
               </span>
             </div>
           </footer>

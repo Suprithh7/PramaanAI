@@ -34,7 +34,6 @@ export async function getCase(id: string) {
       ruleChecks: { orderBy: { ruleCode: "asc" } },
       evidenceFiles: { orderBy: { createdAt: "desc" } },
       filingDeclaration: true,
-      filingBrief: true,
       auditLogs: { orderBy: { sequence: "desc" }, take: 40 },
     },
   });

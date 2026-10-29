@@ -78,7 +78,6 @@ model Application {
   evidenceFiles EvidenceFile[]
   auditLogs     AuditLog[]
   filingDeclaration FilingDeclaration?
-  filingBrief       FilingBrief?
 
   @@index([status])
   @@index([slaStatus])
@@ -98,16 +97,6 @@ model FilingDeclaration {
   buildingExpiry      DateTime
   undertakingSignedOn DateTime
   createdAt           DateTime    @default(now())
-}
-
-model FilingBrief {
-  id            String      @id @default(cuid())
-  applicationId String      @unique
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  engine        String // LLM | GROUNDED
-  model         String?
-  payload       String
-  generatedAt   DateTime    @default(now())
 }
 
 model ScrutinyRuleCheck {
@@ -191,7 +180,6 @@ model EvidenceFile {
   institution    Institution  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
   docType        String // LEASE_DEED | FIRE_SAFETY | BUILDING_PLAN | UNDERTAKING | OTHER
   detectedType   String
-  typeConfidence Float        @default(0)
   fileName       String
   mimeType       String
   sizeBytes      Int

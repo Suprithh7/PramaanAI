@@ -34,12 +34,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function confidenceTone(value: number): { text: string; bar: string } {
-  if (value >= 0.85) return { text: "text-emerald-700", bar: "bg-emerald-600" };
-  if (value >= 0.6) return { text: "text-brass-700", bar: "bg-brass-500" };
-  return { text: "text-red-700", bar: "bg-red-500" };
-}
-
 function IntegrityBadge({ integrity }: { integrity: EvidenceIntegrity }) {
   const meta = EVIDENCE_INTEGRITY_META[integrity];
   return (
@@ -64,7 +58,7 @@ function VerifyButton({ evidenceId }: { evidenceId: string }) {
         <input type="hidden" name="evidenceId" value={evidenceId} />
         <button type="submit" disabled={pending} className="btn btn-outline btn-xs">
           {pending ? <Loader2 size={9} className="animate-spin" /> : <ShieldCheck size={9} />}
-          {pending ? "Rehashing…" : "Recheck digest"}
+          {pending ? "Checking…" : "Check file unchanged"}
         </button>
       </form>
       {state && <ActionFeedback state={state} className="max-w-[280px]" />}
@@ -81,7 +75,7 @@ function ApplyButton({ evidenceId, disabled }: { evidenceId: string; disabled: b
         onSubmit={(event) => {
           if (
             !window.confirm(
-              "Overwrite the institution profile with the extracted numeric values and append an audit event?",
+              "Update the college profile with the figures read from this document? This is recorded in the audit trail.",
             )
           ) {
             event.preventDefault();
@@ -134,24 +128,13 @@ function ConfirmType({ evidenceId, current }: { evidenceId: string; current: Evi
 }
 
 function FieldCell({ field }: { field: ExtractedField }) {
-  const tone = confidenceTone(field.confidence);
-  const percent = Math.round(field.confidence * 100);
   return (
     <div className="bg-white px-3 py-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-10px font-semibold uppercase tracking-label text-slate-500">
-          {field.label}
-        </span>
-        <span className={`font-mono text-10px font-semibold ${tone.text}`}>{percent}%</span>
+      <div className="text-10px font-semibold uppercase tracking-label text-slate-500">
+        {field.label}
       </div>
       <div className="mt-1 font-mono text-base font-semibold leading-tight text-navy-950">
         {field.value}
-      </div>
-      <div className="mt-1.5 h-1 w-full bg-slate-100" aria-hidden="true">
-        <div className={`h-1 ${tone.bar}`} style={{ width: `${percent}%` }} />
-      </div>
-      <div className="mt-1.5 truncate font-mono text-10px text-slate-400" title={field.snippet}>
-        {field.snippet}
       </div>
     </div>
   );
@@ -214,8 +197,8 @@ export function EvidenceIntake({
         <section className="panel">
           <div className="panel-header">
             <div>
-              <div className="eyebrow">Annexure intake · {referenceNo}</div>
-              <h2 className="panel-title mt-0.5">Upload statutory evidence</h2>
+              <div className="eyebrow">Upload · {referenceNo}</div>
+              <h2 className="panel-title mt-0.5">Add a statutory document</h2>
             </div>
             <div className="flex items-center gap-2">
               <span className="badge border-slate-300 bg-slate-50 text-slate-600">PDF · max 8 MB</span>
@@ -227,7 +210,7 @@ export function EvidenceIntake({
             <div
               role="button"
               tabIndex={0}
-              aria-label="Choose a PDF annexure"
+              aria-label="Choose a PDF document"
               onClick={() => inputRef.current?.click()}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
@@ -267,13 +250,13 @@ export function EvidenceIntake({
                     {file.name}
                   </div>
                   <div className="font-mono text-11px text-slate-500">
-                    {formatBytes(file.size)} · ready for extraction
+                    {formatBytes(file.size)} · ready to upload
                   </div>
                 </>
               ) : (
                 <>
                   <div className="text-sm font-semibold text-navy-900">
-                    Drop a PDF annexure or click to browse
+                    Drop a PDF document or click to browse
                   </div>
                   <div className="text-11px text-slate-500">
                     Lease deed · fire safety · building plan · undertaking
@@ -310,8 +293,12 @@ export function EvidenceIntake({
                 </select>
               </div>
               <button type="submit" className="btn btn-primary" disabled={pending || !file}>
-                {pending ? <Loader2 size={11} className="animate-spin" /> : <Fingerprint size={11} />}
-                {pending ? "Extracting · hashing…" : "Ingest & hash annexure"}
+                {pending ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <FileText size={11} />
+                )}
+                {pending ? "Reading file…" : "Upload and check file"}
               </button>
               <ActionFeedback state={state} />
             </div>
@@ -322,25 +309,25 @@ export function EvidenceIntake({
       <section className="panel overflow-hidden">
         <div className="panel-header">
           <div>
-            <div className="eyebrow">Evidence register · digest referenced</div>
-            <h2 className="panel-title mt-0.5">Stored annexures</h2>
+            <div className="eyebrow">Documents on this case</div>
+            <h2 className="panel-title mt-0.5">Uploaded documents</h2>
           </div>
           <div className="flex flex-wrap items-center gap-3 font-mono text-11px uppercase tracking-label text-slate-500">
             <span>{stored} stored</span>
-            <span>{withText} text layer</span>
+            <span>{withText} readable</span>
             <span className={verified > 0 ? "text-emerald-700" : undefined}>{verified} verified</span>
-            {tampered > 0 && <span className="text-red-700">{tampered} mismatch</span>}
+            {tampered > 0 && <span className="text-red-700">{tampered} changed</span>}
           </div>
         </div>
 
         {rows.length === 0 ? (
           <div className="p-4">
             <EmptyState
-              title="No annexures stored for this case"
+              title="No documents uploaded for this case"
               description={
                 canUpload
-                  ? "Upload a PDF annexure to extract fields, classify the document and bind it to a SHA-256 digest."
-                  : "The institution has not yet filed any PDF annexure against this case."
+                  ? "Upload a PDF to read its details, identify the document and give it a unique file code."
+                  : "The institution has not yet uploaded any PDF document against this case."
               }
               icon={<FileText size={16} />}
             />
@@ -350,10 +337,10 @@ export function EvidenceIntake({
             <table className="data-table min-w-[860px]">
               <thead>
                 <tr>
-                  <th className="w-[252px]">Annexure</th>
-                  <th className="w-[172px]">Classification</th>
-                  <th className="w-[158px]">Integrity</th>
-                  <th className="w-[176px]">SHA-256</th>
+                  <th className="w-[252px]">Document</th>
+                  <th className="w-[172px]">Type</th>
+                  <th className="w-[158px]">Status</th>
+                  <th className="w-[176px]">File code</th>
                   <th className="w-[78px]">Size</th>
                   <th className="w-[136px]">Actions</th>
                 </tr>
@@ -381,8 +368,10 @@ export function EvidenceIntake({
                       <div className="text-11px font-semibold text-navy-900">
                         {EVIDENCE_TYPE_LABELS[row.docType]}
                       </div>
-                      <div className="mt-0.5 font-mono text-10px text-slate-500">
-                        {row.detectedType.replaceAll("_", " ")} · {Math.round(row.typeConfidence * 100)}%
+                      <div className="mt-0.5 text-10px text-slate-500">
+                        {row.detectedType === row.docType
+                          ? "Detected from the text"
+                          : `Text reads as ${row.detectedType.replaceAll("_", " ").toLowerCase()}`}
                       </div>
                       {row.referenceMatch !== null && (
                         <div
@@ -407,7 +396,7 @@ export function EvidenceIntake({
                     <td>
                       <IntegrityBadge integrity={row.integrity} />
                       <div className="mt-1 font-mono text-10px text-slate-400">
-                        {row.verifyCount} recheck{row.verifyCount === 1 ? "" : "s"}
+                        {row.verifyCount} file check{row.verifyCount === 1 ? "" : "s"}
                         {row.lastVerifiedAt ? ` · ${fmtDateTime(row.lastVerifiedAt)}` : ""}
                       </div>
                     </td>
@@ -417,9 +406,6 @@ export function EvidenceIntake({
                           {truncateHash(row.sha256, 8, 6)}
                         </span>
                         <CopyButton value={row.sha256} label="" />
-                      </div>
-                      <div className="mt-1 font-mono text-10px text-slate-400">
-                        {row.textChars} chars
                       </div>
                     </td>
                     <td className="num font-mono text-11px text-slate-600">
@@ -438,8 +424,8 @@ export function EvidenceIntake({
                             selected?.id === row.id ? "btn-primary" : "btn-outline"
                           }`}
                         >
-                          <Fingerprint size={9} />
-                          {row.fields.length} field{row.fields.length === 1 ? "" : "s"}
+                          <FileText size={9} />
+                          {row.fields.length} detail{row.fields.length === 1 ? "" : "s"}
                         </button>
                       </div>
                     </td>
@@ -461,7 +447,7 @@ export function EvidenceIntake({
         <section className="panel overflow-hidden">
           <div className="panel-header">
             <div className="min-w-0">
-              <div className="eyebrow">Field-level extraction · confidence scored</div>
+              <div className="eyebrow">Details read from this document</div>
               <h2 className="panel-title mt-0.5 truncate">{selected.fileName}</h2>
             </div>
             <div className="flex items-center gap-2">
@@ -491,10 +477,9 @@ export function EvidenceIntake({
               <div className="flex items-start gap-1.5 text-11px leading-relaxed text-amber-900">
                 <AlertTriangle size={10} className="mt-0.5 shrink-0" />
                 <div>
-                  <span className="font-semibold uppercase tracking-label">Manual review required</span>
+                  <span className="font-semibold uppercase tracking-label">Type needs confirmation</span>
                   <span className="ml-1.5">
-                    {selected.note ??
-                      `Classifier confidence ${Math.round(selected.typeConfidence * 100)}% is below the 60% review floor.`}
+                    {selected.note ?? "The document type could not be read from the text."}
                   </span>
                 </div>
               </div>
@@ -508,43 +493,9 @@ export function EvidenceIntake({
             </div>
           )}
 
-          {(selected.drivers.length > 0 || selected.runnerUp) && (
-            <div className="border-b border-slate-200 bg-slate-50/60 px-4 py-2">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-11px">
-                <span className="font-semibold uppercase tracking-label text-slate-500">Why this class</span>
-                <span className="font-mono font-semibold text-navy-950">
-                  {selected.detectedType.replaceAll("_", " ")} ·{" "}
-                  {Math.round(selected.typeConfidence * 100)}%
-                </span>
-                {selected.runnerUp && (
-                  <span className="text-slate-500">
-                    next {selected.runnerUp.type.replaceAll("_", " ")} ·{" "}
-                    {selected.runnerUp.probability >= 0.005
-                      ? `${Math.round(selected.runnerUp.probability * 100)}%`
-                      : "<1%"}
-                  </span>
-                )}
-                {selected.drivers.length > 0 && (
-                  <>
-                    <span className="text-slate-300">|</span>
-                    <span className="text-slate-500">signals</span>
-                    {selected.drivers.map((driver) => (
-                      <span
-                        key={driver.token}
-                        className="border border-slate-300 bg-white px-1 font-mono text-10px text-slate-700"
-                      >
-                        {driver.token.replaceAll("_", " ")}
-                      </span>
-                    ))}
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-
           {selected.fields.length === 0 ? (
             <div className="px-4 py-4 text-xs text-slate-600">
-              {selected.note ?? "No statutory fields were matched in this annexure."}
+              {selected.note ?? "No declared figures were found in this document."}
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-3">
@@ -555,12 +506,12 @@ export function EvidenceIntake({
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/70 px-4 py-2 text-11px text-slate-500">
-            <span className="font-mono uppercase tracking-label">
-              {selected.hasTextLayer ? `${selected.textChars} text chars` : "No text layer"} ·{" "}
-              {selected.verifyCount} digest recheck{selected.verifyCount === 1 ? "" : "s"}
+            <span>
+              {selected.hasTextLayer ? "Text read from the PDF" : "No readable text in this PDF"} ·{" "}
+              {selected.verifyCount} file check{selected.verifyCount === 1 ? "" : "s"}
             </span>
             <span className="font-mono text-10px text-slate-400">
-              ref {truncateHash(selected.sha256, 12, 8)}
+              {truncateHash(selected.sha256, 12, 8)}
             </span>
           </div>
         </section>

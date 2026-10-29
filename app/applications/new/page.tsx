@@ -67,7 +67,7 @@ export default async function NewApplicationPage() {
           { label: "Application register", href: "/applications" },
           { label: "New filing" },
         ]}
-        description={`Filing on behalf of ${institution.name}. Every figure below is declared by the institution; the APH matrix and scrutiny brief are produced from those figures the moment the case is filed.`}
+        description={`Filing on behalf of ${institution.name}. Every figure below is declared by the institution; the APH rule matrix is produced from those figures the moment the case is filed.`}
         meta={
           <>
             <span className="badge border-navy-300 bg-navy-50 text-navy-900">{institution.code}</span>

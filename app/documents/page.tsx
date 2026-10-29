@@ -476,10 +476,11 @@ export default async function DocumentsPage({
                       <span className="badge border-red-300 bg-red-50 text-red-900">Exact copy</span>
                     </div>
                     <div className="mt-1.5 font-mono text-2xs text-slate-400">
-                      fingerprint {truncateHash(entry.sha256, 12, 6)}
+                      file code {truncateHash(entry.sha256, 12, 6)}
                     </div>
                     <p className="mt-1.5 text-2xs leading-relaxed text-slate-500">
-                      The two uploads are byte-identical. One of these colleges did not submit its own document.
+                      Both uploads are the same file, byte for byte. One of these colleges did not submit its own
+                      document.
                     </p>
                   </li>
                 ))}

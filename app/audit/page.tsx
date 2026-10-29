@@ -8,15 +8,18 @@ import {
   Filter,
   Fingerprint,
   Lock,
+  RotateCcw,
   Search,
   ShieldCheck,
   ShieldX,
+  Unlock,
   X,
 } from "lucide-react";
-import { attestLedgerAction } from "@/app/actions";
+import { attestLedgerAction, repairLedgerAction, simulateTamperAction } from "@/app/actions";
 import { prisma } from "@/lib/db";
 import { verifyAuditLedger } from "@/lib/audit";
 import { fmtDateTime, fmtNumber, shortRef, truncateHash } from "@/lib/format";
+import { readLedgerBackup } from "@/lib/ledger-demo";
 import { getSession } from "@/lib/session";
 import { AUDIT_ACTION_LABELS, ROLE_META, ROLES, auditActionLabel, isRole } from "@/lib/types";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -30,9 +33,6 @@ export const dynamic = "force-dynamic";
 type SearchParams = { q?: string; action?: string; role?: string; page?: string };
 
 const PAGE_SIZE = 30;
-
-const TAMPER_COMMAND =
-  `sqlite3 prisma/dev.db "DROP TRIGGER AuditLog_no_update; UPDATE AuditLog SET detail='edited after the fact' WHERE sequence=(SELECT MAX(sequence) FROM AuditLog);"`;
 
 export default async function AuditPage({
   searchParams,
@@ -92,6 +92,7 @@ export default async function AuditPage({
   const visible = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const verification = await verifyAuditLedger();
+  const demoActive = Boolean(await readLedgerBackup());
   const actionValues = Array.from(new Set(logs.map((log) => log.action))).sort((a, b) =>
     auditActionLabel(a).localeCompare(auditActionLabel(b)),
   );
@@ -116,7 +117,7 @@ export default async function AuditPage({
       <PageHeader
         eyebrow="Audit trail"
         title="Every action is written in stone"
-        description="This is the receipt book for the whole system. Each entry carries a fingerprint built from the entry before it, so changing one line breaks every line that follows. The database itself refuses edits and deletes."
+        description="This is the receipt book for the whole system. Each entry carries a security code built from its own contents and the entry before it, so changing one line breaks every line that follows. The database itself refuses edits and deletes."
         meta={
           <>
             <span
@@ -127,11 +128,11 @@ export default async function AuditPage({
               }`}
             >
               {verification.valid ? <ShieldCheck size={11} /> : <ShieldX size={11} />}
-              {verification.valid ? "Chain intact" : "Chain broken"}
+              {verification.valid ? "Record intact" : "Record altered"}
             </span>
-            <span className="text-xs text-slate-600">{fmtNumber(verification.entries)} entries sealed</span>
+            <span className="text-xs text-slate-600">{fmtNumber(verification.entries)} entries recorded</span>
             <span className="text-xs text-slate-600">
-              {verification.triggers.length} database guard{verification.triggers.length === 1 ? "" : "s"} active
+              {verification.triggers.length} tamper guard{verification.triggers.length === 1 ? "" : "s"} active
             </span>
           </>
         }
@@ -179,8 +180,8 @@ export default async function AuditPage({
                 className={`mt-1 text-xs leading-relaxed ${verification.valid ? "text-emerald-800" : "text-red-800"}`}
               >
                 {verification.valid
-                  ? "Every fingerprint matches its own contents and the entry before it. Nothing can be silently altered or removed."
-                  : `${verification.reason ?? "The fingerprint no longer matches."} The record cannot be trusted until this is explained.`}
+                  ? "Every entry matches its own contents and the entry before it. Nothing can be silently altered or removed."
+                  : `${verification.reason ?? "The security code no longer matches."} The record cannot be trusted until this is explained.`}
               </div>
             </div>
           </div>
@@ -196,11 +197,11 @@ export default async function AuditPage({
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
-          label="Entries sealed"
+          label="Entries recorded"
           value={fmtNumber(verification.entries)}
           tone="navy"
           icon={<Database size={15} />}
-          detail="Appended since the first record"
+          detail="Appended since the first entry"
         />
         <MetricCard
           label="You can see"
@@ -216,7 +217,7 @@ export default async function AuditPage({
         />
         <MetricCard
           label="Integrity"
-          value={verification.valid ? "PASS" : "FAULT"}
+          value={verification.valid ? "INTACT" : "BROKEN"}
           tone={verification.valid ? "emerald" : "red"}
           icon={verification.valid ? <CheckCircle2 size={15} /> : <ShieldX size={15} />}
           detail={verification.valid ? "Re-checked on this page load" : `Broken at #${verification.brokenAtSequence}`}
@@ -330,7 +331,7 @@ export default async function AuditPage({
                       <th className="w-[150px]">Who</th>
                       <th className="w-[160px]">Case</th>
                       <th>Detail</th>
-                      <th className="w-[130px]">Fingerprint</th>
+                      <th className="w-[130px]">Security code</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -394,7 +395,7 @@ export default async function AuditPage({
                             </div>
                             {log.previousHash && (
                               <div className="mt-0.5 font-mono text-2xs text-slate-400">
-                                prev {truncateHash(log.previousHash, 6, 4)}
+                                was {truncateHash(log.previousHash, 6, 4)}
                               </div>
                             )}
                           </td>
@@ -437,70 +438,80 @@ export default async function AuditPage({
           <section className={`panel border-l-2 ${verification.valid ? "border-l-brass-500" : "border-l-red-500"}`}>
             <div className="panel-header">
               <div>
-                <div className="eyebrow">Live demo</div>
-                <h2 className="panel-title mt-0.5">Try to tamper with it</h2>
+                <div className="eyebrow">Live demo · two clicks</div>
+                <h2 className="panel-title mt-0.5">Break the record, then repair it</h2>
               </div>
               <Lock size={16} className="text-slate-400" />
             </div>
             <div className="space-y-3 p-4">
               <p className="text-xs leading-relaxed text-slate-600">
-                A normal edit is rejected by the database. To see the detection work, switch the guard off, change
-                one old entry, then reload this page.
+                The first button edits the newest entry straight in the database — exactly what an attacker with
+                server access would do, bypassing the application completely. The page reloads and the banner above
+                names the entry that changed. The second button puts the original text back.
               </p>
-              <ol className="space-y-2 text-xs leading-relaxed text-slate-600">
-                <li>
-                  <span className="font-semibold text-navy-900">1.</span> Open a terminal in the project folder.
-                </li>
-                <li>
-                  <span className="font-semibold text-navy-900">2.</span> Run the command below.
-                </li>
-                <li>
-                  <span className="font-semibold text-navy-900">3.</span> Reload this page. The banner turns red and
-                  names the exact entry that was changed.
-                </li>
-              </ol>
-              <div className="border border-slate-300 bg-slate-900 p-2.5">
-                <code className="block break-all font-mono text-2xs leading-relaxed text-emerald-200">
-                  {TAMPER_COMMAND}
-                </code>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <CopyButton value={TAMPER_COMMAND} label="Copy command" />
-                <span className="text-2xs text-slate-400">Restore with: npm run db:setup</span>
+              <div className="flex flex-wrap items-start gap-2">
+                {demoActive ? (
+                  <ActionButton
+                    action={repairLedgerAction}
+                    fields={{}}
+                    label="Repair the record"
+                    pendingLabel="Repairing…"
+                    variant="emerald"
+                    icon={<RotateCcw size={12} />}
+                  />
+                ) : (
+                  <ActionButton
+                    action={simulateTamperAction}
+                    fields={{}}
+                    label="Alter the newest entry"
+                    pendingLabel="Altering…"
+                    variant="danger"
+                    icon={<Unlock size={12} />}
+                    disabled={!verification.valid}
+                    disabledReason="The record already shows a break."
+                  />
+                )}
+                {demoActive && verification.valid && (
+                  <span className="text-xs text-emerald-800">Restored — the record verifies again.</span>
+                )}
               </div>
               {!verification.valid && (
                 <div className="border border-red-300 bg-red-50 p-2.5 text-xs leading-relaxed text-red-900">
-                  It worked — entry #{verification.brokenAtSequence} no longer matches its fingerprint. In production
-                  this is how a tampered record is caught.
+                  Entry #{verification.brokenAtSequence} no longer matches its security code. The change happened
+                  outside the application, yet the record still points straight at it.
                 </div>
               )}
+              <p className="text-2xs leading-relaxed text-slate-400">
+                The demo acts on the same database this prototype runs on. Both steps leave the record exactly as it
+                was.
+              </p>
             </div>
           </section>
 
           <section className="panel">
             <div className="panel-header">
               <div>
-                <div className="eyebrow">How it is sealed</div>
-                <h2 className="panel-title mt-0.5">Why this cannot be faked</h2>
+                <div className="eyebrow">How the seal works</div>
+                <h2 className="panel-title mt-0.5">Why one edit cannot hide</h2>
               </div>
               <ShieldCheck size={16} className="text-slate-400" />
             </div>
             <ul className="space-y-2 p-4 text-xs leading-relaxed text-slate-600">
               <li className="flex gap-2">
-                <span className="font-semibold text-navy-900">1.</span> Each entry is fingerprinted together with the
-                entry before it.
+                <span className="font-semibold text-navy-900">1.</span> Every entry stores a security code built from
+                its own contents and the code of the entry before it.
               </li>
               <li className="flex gap-2">
-                <span className="font-semibold text-navy-900">2.</span> Editing any entry changes its fingerprint, so
-                every later entry stops matching.
+                <span className="font-semibold text-navy-900">2.</span> Change one word in an entry and its code no
+                longer matches — every entry after it breaks too.
               </li>
               <li className="flex gap-2">
-                <span className="font-semibold text-navy-900">3.</span> Entry numbers must stay in an unbroken run — a
-                deleted entry leaves a visible gap.
+                <span className="font-semibold text-navy-900">3.</span> Entry numbers must run 1, 2, 3 … with no gaps,
+                so a deleted entry is just as visible as an edited one.
               </li>
               <li className="flex gap-2">
-                <span className="font-semibold text-navy-900">4.</span> The database itself blocks edits and deletes,
-                even if the application is bypassed.
+                <span className="font-semibold text-navy-900">4.</span> The database refuses edits and deletes
+                outright, so even another program cannot quietly change history.
               </li>
             </ul>
           </section>

@@ -1,8 +1,7 @@
 import { prisma } from "./db";
 import { toEvidenceRow } from "./evidence";
-import { fmtDate, truncateHash } from "./format";
+import { fmtDate } from "./format";
 import {
-  EVIDENCE_FIELD_LABELS,
   EVIDENCE_TYPE_LABELS,
   type ConsistencyFinding,
   type ConsistencyReport,
@@ -128,8 +127,8 @@ export async function getConsistencyReport(institutionId: string): Promise<Consi
       id: `DIGEST_REUSE:${own?.id ?? digest}`,
       kind: "DIGEST_REUSE",
       severity: "HIGH",
-      title: "Annexure reused across institutions",
-      detail: `SHA-256 ${truncateHash(digest, 10, 6)} is byte-identical to ${references.join("; ")}.`,
+      title: "The same file was uploaded by another college",
+      detail: `${own?.fileName ?? "This file"} is an exact copy of ${references.join("; ")}. One paper cannot belong to two colleges.`,
       evidenceId: own?.id ?? null,
       relatedInstitution: [...new Set(matches.map((entry) => entry.institution.name))].join(", "),
     });
@@ -145,8 +144,8 @@ export async function getConsistencyReport(institutionId: string): Promise<Consi
         id: `NAME_MISMATCH:${row.id}`,
         kind: "NAME_MISMATCH",
         severity: "HIGH",
-        title: "Annexure names a different institution",
-        detail: `${row.fileName} names “${nameField.value}” but is filed under ${institution.name}.`,
+        title: "Document names a different college",
+        detail: `${row.fileName} names “${nameField.value}” but it is filed under ${institution.name}.`,
         evidenceId: row.id,
         relatedInstitution: null,
       });
@@ -170,8 +169,8 @@ export async function getConsistencyReport(institutionId: string): Promise<Consi
         id: `PROFILE_CONFLICT:${row.id}:${field.key}`,
         kind: "PROFILE_CONFLICT",
         severity: "MEDIUM",
-        title: `${EVIDENCE_FIELD_LABELS[field.key]} conflicts with the statutory profile`,
-        detail: `${row.fileName} states ${field.value} · institution profile holds ${formattedProfile}.`,
+        title: "A number on the paper does not match the college record",
+        detail: `${row.fileName} states ${field.value} · the college record holds ${formattedProfile}.`,
         evidenceId: row.id,
         relatedInstitution: null,
       });
@@ -188,8 +187,8 @@ export async function getConsistencyReport(institutionId: string): Promise<Consi
         id: `REGISTER_EXPIRED:${document.id}`,
         kind: "REGISTER_EXPIRED",
         severity: "HIGH",
-        title: "Document marked valid after expiry",
-        detail: `${EVIDENCE_TYPE_LABELS[docType] ?? document.docType} is recorded VALID but lapsed ${fmtDate(document.expiryDate)} (${days} day${days === 1 ? "" : "s"} ago).`,
+        title: "Document still marked valid after its expiry",
+        detail: `${EVIDENCE_TYPE_LABELS[docType] ?? document.docType} is recorded as valid but lapsed ${fmtDate(document.expiryDate)} (${days} day${days === 1 ? "" : "s"} ago).`,
         evidenceId: null,
         relatedInstitution: null,
       });
@@ -205,7 +204,7 @@ export async function getConsistencyReport(institutionId: string): Promise<Consi
           id: `LAPSED_EVIDENCE:${annexure.id}`,
           kind: "LAPSED_EVIDENCE",
           severity: "HIGH",
-          title: "Annexure validity lapsed",
+          title: "The uploaded document has expired",
           detail: `${annexure.fileName} expired ${fmtDate(new Date(annexureExpiry))} (${days} day${days === 1 ? "" : "s"} ago).`,
           evidenceId: annexure.id,
           relatedInstitution: null,
@@ -215,8 +214,8 @@ export async function getConsistencyReport(institutionId: string): Promise<Consi
           id: `EXPIRY_CONFLICT:${annexure.id}`,
           kind: "EXPIRY_CONFLICT",
           severity: "MEDIUM",
-          title: "Validity dates disagree",
-          detail: `${EVIDENCE_TYPE_LABELS[docType] ?? docType} annexure states ${fmtDate(new Date(annexureExpiry))} · statutory register records ${fmtDate(document.expiryDate)}.`,
+          title: "The paper and the register give different expiry dates",
+          detail: `${EVIDENCE_TYPE_LABELS[docType] ?? docType} file says ${fmtDate(new Date(annexureExpiry))} · the document register says ${fmtDate(document.expiryDate)}.`,
           evidenceId: annexure.id,
           relatedInstitution: null,
         });
@@ -230,8 +229,8 @@ export async function getConsistencyReport(institutionId: string): Promise<Consi
       id: `MISSING_ANNEXURE:${type}`,
       kind: "MISSING_ANNEXURE",
       severity: "INFO",
-      title: `No ${EVIDENCE_TYPE_LABELS[type].toLowerCase()} annexure`,
-      detail: `No ${EVIDENCE_TYPE_LABELS[type].toLowerCase()} PDF is bound to this case.`,
+      title: `${EVIDENCE_TYPE_LABELS[type]} not uploaded yet`,
+      detail: `No ${EVIDENCE_TYPE_LABELS[type].toLowerCase()} has been uploaded for this case.`,
       evidenceId: null,
       relatedInstitution: null,
     });

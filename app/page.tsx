@@ -7,9 +7,9 @@ import {
   FileSearch,
   Fingerprint,
   MapPin,
+  Play,
   ScrollText,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { getLedgerIntegritySummary } from "@/lib/audit";
 import { activeApps, ruleStats, slaRows } from "@/lib/analytics";
@@ -69,7 +69,7 @@ const SOLUTIONS = [
   {
     icon: ShieldCheck,
     title: "An audit trail nobody can rewrite",
-    body: "Every action is chained to the one before it. Change a record and the chain breaks — instantly visible to auditors.",
+    body: "Every action is sealed to the one before it. Change a record and every later record stops matching — instantly visible to auditors.",
     href: "/audit",
     link: "Test the audit trail",
   },
@@ -93,7 +93,7 @@ const STEPS = [
   },
   {
     title: "Documents are verified",
-    body: "Each annexure is fingerprinted, compared with the declared figures and cross-checked for reuse.",
+    body: "Each document is fingerprinted, compared with the declared figures and cross-checked for reuse.",
   },
   {
     title: "Inspector visits campus",
@@ -133,7 +133,7 @@ export default async function DashboardPage() {
           <>
             {demoCase && (
               <Link href={`/applications/${demoCase.id}`} className="btn btn-primary">
-                <Sparkles size={13} /> Run the demo
+                <Play size={13} /> Run the demo
               </Link>
             )}
             <Link href="/pre-check" className="btn btn-outline">
@@ -150,7 +150,7 @@ export default async function DashboardPage() {
               {documents.toLocaleString("en-IN")} statutory documents
             </span>
             <span className="badge border-slate-300 bg-white text-slate-700">
-              {evidence} fingerprinted PDFs
+              {evidence} PDFs on file
             </span>
             <span className="badge border-emerald-300 bg-emerald-50 text-emerald-900">
               {integrity.valid ? "Audit trail intact" : "Audit alert"}
@@ -325,7 +325,7 @@ export default async function DashboardPage() {
         <div className="grid gap-px bg-slate-200 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
           <div className="bg-white p-5">
             <div className="flex items-center gap-2">
-              <Sparkles size={16} className="text-brass-600" />
+              <Play size={16} className="text-brass-600" />
               <h2 className="font-serif text-xl font-semibold text-navy-950">
                 The five-minute demo route
               </h2>
@@ -386,28 +386,43 @@ export default async function DashboardPage() {
             <div className="flex items-center gap-2 text-brass-300">
               <Building2 size={15} />
               <span className="text-[11px] font-semibold uppercase tracking-label">
-                Under the hood
+                Why this holds up
               </span>
             </div>
-            <h3 className="mt-2 font-serif text-xl font-semibold">Built to be trusted, not guessed</h3>
+            <h3 className="mt-2 font-serif text-xl font-semibold">
+              Four guarantees, every single time
+            </h3>
             <ul className="mt-4 space-y-3 text-sm leading-relaxed text-navy-200">
               {[
-                "The rule engine is deterministic. The same numbers always produce the same result — no black box, no external AI service.",
-                "Documents are identified locally from their own text. Reuse is caught by comparing SHA-256 fingerprints across every college.",
-                "Inspections combine GPS radius, conflict-of-interest screening and a time-stamped site report.",
-                "Every action is appended to a hash-linked ledger protected by database triggers.",
+                {
+                  title: "The rule check cannot be argued with",
+                  body: "The same declared numbers always produce the same verdict, with the failing rule and the exact shortfall printed for both sides.",
+                },
+                {
+                  title: "A copied document cannot pass twice",
+                  body: "Every upload is fingerprinted. If the same file appears under two colleges, both cases are flagged with the names of both.",
+                },
+                {
+                  title: "An inspection cannot be faked",
+                  body: "The inspector must be inside a 750 m campus radius, declare any conflict of interest, and file a time-stamped report.",
+                },
+                {
+                  title: "No record can be quietly edited",
+                  body: "Each action is sealed to the one before it. Any change to history is caught the moment the ledger is read.",
+                },
               ].map((item) => (
-                <li key={item} className="flex gap-2.5">
+                <li key={item.title} className="flex gap-2.5">
                   <ShieldCheck size={15} className="mt-0.5 shrink-0 text-emerald-400" />
-                  <span>{item}</span>
+                  <span>
+                    <span className="block font-semibold text-white">{item.title}</span>
+                    <span className="mt-0.5 block text-[13px] text-navy-300">{item.body}</span>
+                  </span>
                 </li>
               ))}
             </ul>
-            <div className="mt-5 border-t border-white/10 pt-3 text-xs text-navy-300">
-              {integrity.entries} audit entries · chain head{" "}
-              <span className="font-mono text-brass-200">
-                {integrity.headHash ? `${integrity.headHash.slice(0, 12)}…` : "genesis"}
-              </span>
+            <div className="mt-5 border-t border-white/10 pt-3 text-xs leading-relaxed text-navy-300">
+              Everything here runs offline on this machine — no API key, no external service.{" "}
+              <span className="text-navy-200">{integrity.entries} sealed audit entries.</span>
             </div>
           </div>
         </div>

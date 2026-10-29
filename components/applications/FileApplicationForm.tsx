@@ -8,7 +8,6 @@ import {
   FilePlus2,
   Loader2,
   Scale,
-  Sparkles,
 } from "lucide-react";
 import { ActionFeedback } from "@/components/ui/ActionFeedback";
 import {
@@ -178,7 +177,7 @@ export function FileApplicationForm({
           onSubmit={(event) => {
             if (
               !window.confirm(
-                `File this application for ${institutionName}? The declared figures will be evaluated against all APH rules, a scrutiny brief will be generated, and both will be written to the audit ledger.`,
+                `File this application for ${institutionName}? The declared figures will be evaluated against all APH rules and written to the audit ledger.`,
               )
             ) {
               event.preventDefault();
@@ -444,7 +443,7 @@ export function FileApplicationForm({
               <div className="eyebrow">On filing</div>
               <h2 className="panel-title mt-0.5">What is generated immediately</h2>
             </div>
-            <Sparkles size={13} className="text-brass-600" />
+            <FilePlus2 size={13} className="text-brass-600" />
           </div>
           <ol className="space-y-2 px-4 py-3 text-xs leading-relaxed text-slate-600">
             <li>
@@ -457,13 +456,8 @@ export function FileApplicationForm({
               needed for the first result.
             </li>
             <li>
-              A scrutiny brief is composed from the same matrix, citing the observed and threshold
-              values.
-            </li>
-            <li>
-              <span className="font-mono text-11px text-slate-700">APPLICATION_FILED</span> and{" "}
-              <span className="font-mono text-11px text-slate-700">FILING_BRIEF_GENERATED</span>{" "}
-              appended to the hash-chained ledger.
+              <span className="font-mono text-11px text-slate-700">APPLICATION_FILED</span> appended
+              to the audit ledger.
             </li>
           </ol>
         </section>

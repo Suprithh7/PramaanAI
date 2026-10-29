@@ -6,9 +6,9 @@ files once, every rule is checked in seconds, documents are fingerprinted,
 inspectors must be physically on campus, and every action is sealed into a
 tamper-evident ledger.
 
-No external AI service is used. Every number, verdict and flag in the prototype
-comes from a deterministic rule engine running on seeded data — the same input
-always produces the same output, which is what a regulator needs.
+No AI service, API key or third-party data service is used. Every number,
+verdict and flag comes from fixed rules running on seeded data — the same input
+always produces the same output, which is exactly what a regulator needs.
 
 ---
 
@@ -34,10 +34,10 @@ Three things go wrong:
 | --- | --- | --- |
 | Rule checks in seconds | APH-101…107 evaluated with the exact rule, declared figure and shortfall | `/scrutiny`, `/applications/[id]` |
 | Colleges can pre-check before filing | Interactive simulator — move the numbers, watch rules flip red/green | `/pre-check` |
-| Documents can be trusted | SHA-256 fingerprint per PDF, local text extraction, cross-college reuse detection | `/documents` |
+| Documents can be trusted | Every PDF is fingerprinted; text is read locally; the same file under two colleges is flagged | `/documents` |
 | Inspections really happened | 750 m geofence, conflict-of-interest screening, location-stamped reports | `/inspections` |
 | Deadlines escalate themselves | SLA clock, automatic escalations, penalty points | `/applications` |
-| Nothing can be rewritten | Hash-linked ledger with database triggers blocking edits/deletes | `/audit` |
+| Nothing can be rewritten | Sealed ledger: each entry protects the one before it, and the database refuses edits/deletes | `/audit` |
 
 ## Five-minute demo script
 
@@ -48,14 +48,14 @@ Everything below is clickable in the prototype.
    Engineering & Management* (`ER/0061`) → Rule check. Five of seven APH rules
    fail with the exact declared value and the shortfall.
 2. **A copied certificate is caught** — Documents → *“Same file, two colleges”*.
-   The lease deed uploaded by DTI is byte-identical (same SHA-256) to the one
-   uploaded by JITS.
+   The lease deed uploaded by DTI is an exact copy of the one uploaded by JITS.
 3. **An off-campus inspection is refused** — Inspections → switch
    *Demo view as → Inspector* → replace the latitude with `12.9000` and submit.
    The report is rejected with the measured distance (`7,962 m`, limit `750 m`).
-4. **The audit trail detects tampering** — Audit trail → copy the command under
-   *Try to tamper with it*, run it in a terminal, reload. The banner turns red
-   and names the exact edited entry. Restore with `npm run db:setup`.
+4. **The audit trail detects tampering** — Audit trail → *Break the record, then
+   repair it* → **Alter the newest entry**. The page reloads with a red banner
+   naming the exact entry that changed, even though the edit bypassed the
+   application. **Repair the record** puts it back.
 5. **A college fixes its numbers first** — Pre-check → move the sliders from the
    failing preset to the passing one; seven red rules turn green before filing.
 
@@ -64,8 +64,8 @@ Everything below is clickable in the prototype.
 Use **Demo view as** in the top bar. Each role sees the same data through its
 own lens, and the switch itself is written to the audit log.
 
-- **College** — files applications, uploads annexures, answers deficiency
-  notices, renews statutory documents.
+- **College** — files applications, uploads supporting documents, answers
+  deficiency notices, renews statutory documents.
 - **AICTE Officer** — works the scrutiny desk, runs the APH rule check, issues
   formal deficiency notices, schedules inspections for conflict-free committees.
 - **Inspector** — sees only assigned visits; must be inside the campus geofence
@@ -77,12 +77,12 @@ own lens, and the switch itself is written to the audit log.
 ## What is live and working
 
 - 6 institutions, 8 applications, 24 statutory compliance documents, 7
-  fingerprinted PDFs, 3 inspection committees and 44 sealed ledger entries.
+  uploaded PDFs, 3 inspection committees and 44 sealed ledger entries.
 - Full case lifecycle: submission → scrutiny → deficiency → re-scrutiny →
   inspection → SAC/Bureau decision → printable order.
 - Deficiency notices rendered as a real government-style document and
   downloadable as HTML (`/api/notice/[ticketId]`).
-- Every state change appends a hash-linked audit entry; the database refuses
+- Every state change appends a sealed audit entry; the database refuses
   `UPDATE` and `DELETE` on the ledger.
 - The prototype reseeds deterministically, so a demo can always be reset:
   `npm run db:setup`.
@@ -92,8 +92,9 @@ own lens, and the switch itself is written to the audit log.
 - Next.js 15 (App Router), React 19, TypeScript
 - Tailwind CSS
 - Prisma ORM + SQLite
-- `unpdf` for local PDF text extraction and SHA-256 fingerprinting
-- No external AI, model or third-party data service
+- `unpdf` reads text from uploaded PDFs; file fingerprints power duplicate and
+  tamper detection
+- No AI service, API key or third-party data service
 
 ## Run locally
 
@@ -144,7 +145,7 @@ between roles.
 | `/scrutiny` | Officer review desk |
 | `/inspections` | Committee scheduling, conflict checks, geofenced reports |
 | `/documents` | Document register, expiry watch and cross-college reuse |
-| `/audit` | Hash-linked ledger, integrity check and live tamper demo |
+| `/audit` | Sealed ledger, integrity check and one-click tamper demo |
 | `/api/notice/[ticketId]` | Downloadable HTML deficiency notice |
 
 ## Project layout

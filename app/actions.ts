@@ -5,7 +5,6 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { generateFilingBrief, buildBriefContext } from "@/lib/ai";
 import {
   aphInputFor,
   aphSummary,
@@ -21,6 +20,7 @@ import { EVIDENCE_TYPE_LABELS, isEvidenceType, type ExtractedField } from "@/lib
 import { checkConflict, findEvcMember, geofenceResult, GEOFENCE_RADIUS_M } from "@/lib/evc";
 import { canDecide, canRaiseDeficiency, canRunAph, statusAfterSiteReport } from "@/lib/fsm";
 import { fmtDate, istYear } from "@/lib/format";
+import { clearLedgerBackup, readLedgerBackup, writeLedgerBackup } from "@/lib/ledger-demo";
 import { getSession, ROLE_COOKIE, TENANT_COOKIE } from "@/lib/session";
 import { SLA_POLICY, liveDaysInStage, slaForDays } from "@/lib/sla";
 import {
@@ -315,100 +315,8 @@ export async function fileApplicationAction(
     return created;
   });
 
-  const brief = await generateFilingBrief(
-    buildBriefContext({ ...application, institution }, aphInput, results),
-  );
-  await prisma.$transaction(async (tx) => {
-    await tx.filingBrief.create({
-      data: {
-        applicationId: application.id,
-        engine: brief.engine,
-        model: brief.model,
-        payload: JSON.stringify(brief.payload),
-      },
-    });
-    await recordAudit(
-      {
-        applicationId: application.id,
-        institutionId: institution.id,
-        performedBy: session.user.name,
-        role: session.role,
-        action: "FILING_BRIEF_GENERATED",
-        previousState: "SUBMITTED",
-        newState: "SUBMITTED",
-        detail: `The rule engine produced the ${brief.payload.riskLevel.toLowerCase()} filing brief at ${brief.payload.readinessScore}% readiness (${brief.payload.findings.length} finding(s)).`,
-      },
-      tx,
-    );
-  });
-
   refresh();
   redirect(`/applications/${application.id}?tab=aph`);
-}
-
-export async function regenerateFilingBriefAction(
-  _prev: ActionResult | null,
-  formData: FormData,
-): Promise<ActionResult> {
-  const session = await getSession();
-  const permitted = can(session.role, "RUN_APH") || can(session.role, "FILE_APPLICATION");
-  if (!permitted) {
-    return fail(
-      `Action not permitted for ${ROLE_META[session.role].label}. Required identity: an authorised scrutiny or filing role.`,
-    );
-  }
-
-  const applicationId = field(formData, "applicationId");
-  const application = await prisma.application.findUnique({
-    where: { id: applicationId },
-    include: {
-      institution: { include: { documents: true } },
-      filingDeclaration: true,
-    },
-  });
-  if (!application) return fail("Application not found.");
-  const scope = tenantError(session, application.institutionId);
-  if (scope) return fail(scope);
-
-  const aphInput = aphInputFor(application);
-  const results = evaluateAphRules(aphInput);
-  const brief = await generateFilingBrief(buildBriefContext(application, aphInput, results));
-
-  await prisma.$transaction(async (tx) => {
-    await tx.filingBrief.upsert({
-      where: { applicationId: application.id },
-      create: {
-        applicationId: application.id,
-        engine: brief.engine,
-        model: brief.model,
-        payload: JSON.stringify(brief.payload),
-      },
-      update: {
-        engine: brief.engine,
-        model: brief.model,
-        payload: JSON.stringify(brief.payload),
-        generatedAt: new Date(),
-      },
-    });
-    await recordAudit(
-      {
-        applicationId: application.id,
-        institutionId: application.institutionId,
-        performedBy: session.user.name,
-        role: session.role,
-        action: "FILING_BRIEF_GENERATED",
-        previousState: application.status,
-        newState: application.status,
-        detail: `Brief regenerated from the live rule engine: ${brief.payload.riskLevel.toLowerCase()} risk, ${brief.payload.readinessScore}% readiness, ${brief.payload.findings.length} finding(s).`,
-      },
-      tx,
-    );
-  });
-
-  refresh();
-  return ok(
-    `Brief regenerated from the live APH matrix: ${brief.payload.riskLevel.toLowerCase()} risk at ${brief.payload.readinessScore}% readiness.`,
-  );
 }
 
 export async function commenceScrutinyAction(
@@ -1369,13 +1277,80 @@ export async function attestLedgerAction(
     action: "LEDGER_VERIFIED",
     previousState: null,
     newState: null,
-    detail: `Ledger integrity attested across ${verification.entries} entries. Verified head ${verification.headHash}. Database guards: ${verification.triggers.join(", ") || "none"}.`,
+    detail: `Ledger attested by ${session.user.name}: ${verification.entries} entries verified — no gaps, no altered content.`,
   });
 
   refresh();
   return ok(
-    `Ledger verified and attested: ${verification.entries} entries, hash chain intact. Attestation appended to the ledger.`,
+    `Ledger verified and attested: ${verification.entries} entries, record intact. Attestation appended to the ledger.`,
   );
+}
+
+const UPDATE_GUARD_SQL = `CREATE TRIGGER IF NOT EXISTS "AuditLog_no_update" BEFORE UPDATE ON "AuditLog" BEGIN SELECT RAISE(ABORT, 'PRAMAAN audit ledger is append-only'); END;`;
+
+async function withUpdateGuardOff<T>(work: () => Promise<T>): Promise<T> {
+  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "AuditLog_no_update"`);
+  try {
+    return await work();
+  } finally {
+    await prisma.$executeRawUnsafe(UPDATE_GUARD_SQL);
+  }
+}
+
+export async function simulateTamperAction(
+  _prev: ActionResult | null,
+  _formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const denied = requireCapability(session, "ATTEST_LEDGER");
+  if (denied) return denied;
+
+  const verification = await verifyAuditLedger();
+  if (!verification.valid) {
+    return fail("The record is already showing a break. Repair it before breaking it again.");
+  }
+  if (await readLedgerBackup()) {
+    return fail("The record is already showing a break. Repair it before breaking it again.");
+  }
+
+  const latest = await prisma.auditLog.findFirst({
+    orderBy: { sequence: "desc" },
+    select: { sequence: true, detail: true },
+  });
+  if (!latest) return fail("There is nothing in the record yet.");
+
+  await writeLedgerBackup({ sequence: latest.sequence, detail: latest.detail });
+  await withUpdateGuardOff(() =>
+    prisma.$executeRaw`UPDATE "AuditLog" SET "detail" = ${"[altered outside the application]"} WHERE "sequence" = ${latest.sequence}`,
+  );
+
+  refresh();
+  return ok(
+    `Entry #${latest.sequence} was edited directly in the database, bypassing the application and its guards. Look at the red banner above — it names the exact entry that changed.`,
+  );
+}
+
+export async function repairLedgerAction(
+  _prev: ActionResult | null,
+  _formData: FormData,
+): Promise<ActionResult> {
+  const session = await getSession();
+  const denied = requireCapability(session, "ATTEST_LEDGER");
+  if (denied) return denied;
+
+  const backup = await readLedgerBackup();
+  if (!backup) return fail("There is nothing to repair — the record is unchanged.");
+
+  await withUpdateGuardOff(() =>
+    prisma.$executeRaw`UPDATE "AuditLog" SET "detail" = ${backup.detail} WHERE "sequence" = ${backup.sequence}`,
+  );
+  await clearLedgerBackup();
+
+  refresh();
+  const verification = await verifyAuditLedger();
+  return verification.valid
+    ? ok(`Entry #${backup.sequence} restored. All ${verification.entries} entries check out again — the same edit is now impossible to hide.`)
+    : fail(`Entry #${backup.sequence} was restored, but the record still fails at #${verification.brokenAtSequence}. Reset the demo database with npm run db:setup.`);
 }
 
 export async function uploadEvidenceAction(
@@ -1391,7 +1366,7 @@ export async function uploadEvidenceAction(
   const entry = formData.get("file");
 
   if (!entry || typeof entry === "string" || typeof entry.arrayBuffer !== "function") {
-    return fail("Choose a PDF annexure to upload.");
+    return fail("Choose a PDF document to upload.");
   }
   const upload = entry as File;
   if (upload.size === 0) return fail("The selected file is empty.");
@@ -1399,7 +1374,7 @@ export async function uploadEvidenceAction(
     return fail(`Evidence files must be at most ${Math.round(MAX_EVIDENCE_BYTES / (1024 * 1024))} MB.`);
   }
   if (!/\.pdf$/i.test(upload.name) && upload.type !== "application/pdf") {
-    return fail("Only PDF annexures are accepted.");
+    return fail("Only PDF documents are accepted.");
   }
 
   const app = await prisma.application.findUnique({
@@ -1437,7 +1412,6 @@ export async function uploadEvidenceAction(
         institutionId: app.institutionId,
         docType: resolvedType,
         detectedType: processed.detectedType,
-        typeConfidence: processed.typeConfidence,
         fileName: upload.name.slice(0, 200),
         mimeType: upload.type || "application/pdf",
         sizeBytes: upload.size,
@@ -1462,7 +1436,7 @@ export async function uploadEvidenceAction(
         action: "EVIDENCE_UPLOADED",
         previousState: previous ? `${previous.sha256.slice(0, 12)}…` : null,
         newState: `${processed.sha256.slice(0, 12)}…`,
-        detail: `${EVIDENCE_TYPE_LABELS[resolvedType]} uploaded for ${app.referenceNo}. SHA-256 ${processed.sha256.slice(0, 16)}… · classifier ${processed.detectedType} at ${Math.round(processed.typeConfidence * 100)}% · ${processed.fields.length} field(s) extracted${referenceMatch === false ? " · DIGEST MISMATCH against previous version" : referenceMatch === true ? " · identical digest to previous version" : ""}${reuseCount > 0 ? ` · digest already filed by ${reuseCount} other institution(s)` : ""}.`,
+        detail: `${EVIDENCE_TYPE_LABELS[resolvedType]} uploaded for ${app.referenceNo}. File fingerprint ${processed.sha256.slice(0, 16)}… · ${processed.fields.length} detail(s) read from the text${referenceMatch === false ? " · CHANGED since the previous version" : referenceMatch === true ? " · identical to the previous version" : ""}${reuseCount > 0 ? ` · the same file was already uploaded by ${reuseCount} other institution(s)` : ""}.`,
       },
       tx,
     );
@@ -1471,15 +1445,15 @@ export async function uploadEvidenceAction(
   refresh();
   const reuseNote =
     reuseCount > 0
-      ? ` The same digest is already on the national register under ${reuseCount} other institution${reuseCount === 1 ? "" : "s"}.`
+      ? ` The same file is already on the national register under ${reuseCount} other institution${reuseCount === 1 ? "" : "s"}.`
       : "";
   if (!processed.hasTextLayer) {
     return ok(
-      `${upload.name} stored and hashed. No text layer detected — confirm the document type manually.${reuseNote}`,
+      `${upload.name} saved. This is a scanned copy with no readable text — confirm the document type manually.${reuseNote}`,
     );
   }
   return ok(
-    `${upload.name} → ${EVIDENCE_TYPE_LABELS[resolvedType]} · ${processed.fields.length} fields extracted · digest ${processed.sha256.slice(0, 12)}….${reuseNote}`,
+    `${upload.name} → ${EVIDENCE_TYPE_LABELS[resolvedType]} · ${processed.fields.length} details read.${reuseNote}`,
   );
 }
 
@@ -1522,8 +1496,8 @@ export async function verifyEvidenceAction(
         previousState: record.integrity,
         newState: integrity,
         detail: match
-          ? `Digest recheck passed for ${record.fileName}: recomputed SHA-256 equals the stored reference (${record.sha256.slice(0, 16)}…).`
-          : `Digest mismatch for ${record.fileName}. Stored ${record.sha256.slice(0, 16)}… but the stored file now reads ${actual.slice(0, 16)}….`,
+          ? `Fingerprint check passed for ${record.fileName}: the stored file still matches its original fingerprint (${record.sha256.slice(0, 16)}…).`
+          : `Fingerprint mismatch for ${record.fileName}. Stored ${record.sha256.slice(0, 16)}… but the stored file now reads ${actual.slice(0, 16)}….`,
       },
       tx,
     );
@@ -1531,8 +1505,8 @@ export async function verifyEvidenceAction(
 
   refresh();
   return match
-    ? ok(`Digest matched — ${record.fileName} is intact (${record.sha256.slice(0, 12)}…).`)
-    : fail(`Digest mismatch — ${record.fileName} has changed since it was stored.`);
+    ? ok(`Fingerprint matched — ${record.fileName} is unchanged (${record.sha256.slice(0, 12)}…).`)
+    : fail(`Fingerprint mismatch — ${record.fileName} has changed since it was stored.`);
 }
 
 export async function confirmEvidenceTypeAction(
@@ -1569,7 +1543,7 @@ export async function confirmEvidenceTypeAction(
         action: "EVIDENCE_TYPE_CONFIRMED",
         previousState: previousType,
         newState: docType,
-        detail: `${record.fileName} reviewed by ${session.user.name} and confirmed as ${EVIDENCE_TYPE_LABELS[docType]}. Classifier proposed ${record.detectedType} at ${Math.round(record.typeConfidence * 100)}%${record.hasTextLayer ? "" : " on a scanned annexure with no text layer"}.`,
+        detail: `${record.fileName} reviewed by ${session.user.name} and confirmed as ${EVIDENCE_TYPE_LABELS[docType]}${record.hasTextLayer ? "" : " (scanned copy, no readable text)"}.`,
       },
       tx,
     );
@@ -1595,7 +1569,7 @@ export async function applyExtractionAction(
   const scope = tenantError(session, record.institutionId);
   if (scope) return fail(scope);
   if (!record.hasTextLayer) {
-    return fail("No text layer in this annexure — nothing to apply. Enter values manually.");
+    return fail("This is a scanned copy with no readable text — nothing to apply. Enter values manually.");
   }
 
   let fields: ExtractedField[] = [];
@@ -1642,7 +1616,7 @@ export async function applyExtractionAction(
   }
 
   if (Object.keys(updates).length === 0) {
-    return fail("No applicable numeric fields were extracted from this annexure.");
+    return fail("No usable figures were found in this document.");
   }
 
   await prisma.$transaction(async (tx) => {
@@ -1656,7 +1630,7 @@ export async function applyExtractionAction(
         action: "PROFILE_UPDATED_FROM_EVIDENCE",
         previousState: null,
         newState: null,
-        detail: `Institution profile corrected from ${record.fileName}: ${applied.join("; ")}. Digest ${record.sha256.slice(0, 16)}….`,
+        detail: `Institution profile corrected from ${record.fileName}: ${applied.join("; ")}. Fingerprint ${record.sha256.slice(0, 16)}….`,
       },
       tx,
     );

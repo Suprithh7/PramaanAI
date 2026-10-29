@@ -37,23 +37,23 @@ export function ConsistencyPanel({
         <div>
           <div className="flex items-center gap-1.5">
             <Network size={10} className="text-brass-600" />
-            <div className="eyebrow">Evidence graph · cross-annexure checks</div>
+            <div className="eyebrow">Document checks</div>
           </div>
-          <h2 className="panel-title mt-0.5">Consistency findings</h2>
+          <h2 className="panel-title mt-0.5">What the papers show</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2.5 font-mono text-11px uppercase tracking-label">
           <span className="text-slate-500">{report.checksRun} checks</span>
-          {report.high > 0 && <span className="font-semibold text-red-700">{report.high} high</span>}
-          {report.medium > 0 && <span className="font-semibold text-amber-700">{report.medium} medium</span>}
-          {report.info > 0 && <span className="text-slate-500">{report.info} info</span>}
+          {report.high > 0 && <span className="font-semibold text-red-700">{report.high} serious</span>}
+          {report.medium > 0 && <span className="font-semibold text-amber-700">{report.medium} review</span>}
+          {report.info > 0 && <span className="text-slate-500">{report.info} notes</span>}
         </div>
       </div>
 
       {report.findings.length === 0 ? (
         <div className="flex items-center gap-1.5 border-b border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-900">
           <ShieldCheck size={11} />
-          No digest reuse, profile conflict or validity mismatch detected across {report.annexures} annexure
-          {report.annexures === 1 ? "" : "s"}.
+          No copied file, conflicting figure or expired document was found across {report.annexures} uploaded
+          document{report.annexures === 1 ? "" : "s"}.
         </div>
       ) : (
         <ul className="divide-y divide-slate-200">
@@ -92,7 +92,7 @@ export function ConsistencyPanel({
       )}
 
       <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-1.5 text-10px font-mono uppercase tracking-label text-slate-400">
-        {report.annexures} annexures · statutory register · cross-institution digest index · computed{" "}
+        {report.annexures} documents · checked against the register and every other college ·{" "}
         {fmtTime(report.generatedAt)} IST
       </div>
     </section>

@@ -162,7 +162,6 @@ async function seedReuseCase(): Promise<boolean> {
         institutionId: "inst_jits",
         docType: source.docType,
         detectedType: source.detectedType,
-        typeConfidence: source.typeConfidence,
         fileName: "JITS-campus-lease-deed-2026.pdf",
         mimeType: "application/pdf",
         sizeBytes: bytes.length,
@@ -190,7 +189,7 @@ async function seedReuseCase(): Promise<boolean> {
         action: "EVIDENCE_UPLOADED",
         previousState: null,
         newState: `${source.sha256.slice(0, 12)}…`,
-        detail: `${EVIDENCE_TYPE_LABELS[source.detectedType as EvidenceType] ?? "Lease deed"} uploaded for ${app.referenceNo}. SHA-256 ${source.sha256.slice(0, 16)}… · classifier ${source.detectedType} at ${Math.round(source.typeConfidence * 100)}% · ${fieldCount} field(s) extracted · digest matches an annexure already on the national register.`,
+        detail: `${EVIDENCE_TYPE_LABELS[source.detectedType as EvidenceType] ?? "Lease deed"} uploaded for ${app.referenceNo}. ${fieldCount} detail(s) read from the text · the same file is already on the national register for another college.`,
         timestamp: new Date(createdAt.getTime() + 5 * 60_000),
       },
       tx,
@@ -242,7 +241,6 @@ async function main() {
           institutionId: doc.institutionId,
           docType: processed.detectedType,
           detectedType: processed.detectedType,
-          typeConfidence: processed.typeConfidence,
           fileName: doc.fileName,
           mimeType: "application/pdf",
           sizeBytes: bytes.length,
@@ -270,7 +268,7 @@ async function main() {
           action: "EVIDENCE_UPLOADED",
           previousState: null,
           newState: `${processed.sha256.slice(0, 12)}…`,
-          detail: `${EVIDENCE_TYPE_LABELS[processed.detectedType]} uploaded for ${app.referenceNo}. SHA-256 ${processed.sha256.slice(0, 16)}… · classifier ${processed.detectedType} at ${Math.round(processed.typeConfidence * 100)}% · ${processed.fields.length} field(s) extracted.`,
+          detail: `${EVIDENCE_TYPE_LABELS[processed.detectedType]} uploaded for ${app.referenceNo}. ${processed.fields.length} detail(s) read from the text.`,
           timestamp: new Date(createdAt.getTime() + 5 * 60_000),
         },
         tx,
@@ -279,7 +277,7 @@ async function main() {
 
     created += 1;
     console.log(
-      `seed  ${doc.fileName} → ${processed.detectedType} ${Math.round(processed.typeConfidence * 100)}% · ${processed.fields.length} field(s) · ${integrity.toLowerCase()}`,
+      `seed  ${doc.fileName} → ${processed.detectedType} · ${processed.fields.length} detail(s) · ${integrity.toLowerCase()}`,
     );
   }
 

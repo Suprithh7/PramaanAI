@@ -319,7 +319,6 @@ export const ESCALATION_STATUS_META: Record<string, { label: string; tone: strin
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
   APPLICATION_SUBMITTED: "Application submitted",
   APPLICATION_FILED: "Application filed",
-  FILING_BRIEF_GENERATED: "Filing scrutiny brief generated",
   SCRUTINY_COMMENCED: "Scrutiny commenced",
   APH_EVALUATION_RUN: "APH rule evaluation executed",
   DEFICIENCY_ISSUED: "Formal deficiency notice issued",
@@ -338,7 +337,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   APPLICATION_RESUBMITTED: "Application resubmitted",
   IDENTITY_CONTEXT_SWITCHED: "Impersonation context switched",
   EVIDENCE_UPLOADED: "Statutory evidence uploaded",
-  EVIDENCE_VERIFIED: "Evidence digest rechecked",
+  EVIDENCE_VERIFIED: "Document checked against its file",
   EVIDENCE_TYPE_CONFIRMED: "Document type confirmed",
   PROFILE_UPDATED_FROM_EVIDENCE: "Profile corrected from evidence",
 };

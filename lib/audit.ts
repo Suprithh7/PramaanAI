@@ -92,7 +92,7 @@ export async function verifyAuditLedger(): Promise<LedgerVerification> {
         entries: logs.length,
         headHash: previousHash,
         brokenAtSequence: log.sequence,
-        reason: `Sequence gap: expected #${expectedSequence}, found #${log.sequence}.`,
+        reason: `An entry is missing: expected #${expectedSequence}, found #${log.sequence}.`,
         triggers: triggers.map((trigger) => trigger.name),
       };
     }
@@ -103,7 +103,7 @@ export async function verifyAuditLedger(): Promise<LedgerVerification> {
         entries: logs.length,
         headHash: previousHash,
         brokenAtSequence: log.sequence,
-        reason: `Hash link mismatch at entry #${log.sequence}.`,
+        reason: `Entry #${log.sequence} no longer connects to the entry before it.`,
         triggers: triggers.map((trigger) => trigger.name),
       };
     }
@@ -128,7 +128,7 @@ export async function verifyAuditLedger(): Promise<LedgerVerification> {
         entries: logs.length,
         headHash: previousHash,
         brokenAtSequence: log.sequence,
-        reason: `Checksum mismatch at entry #${log.sequence}; event content was altered.`,
+        reason: `The text in entry #${log.sequence} no longer matches the security code stored with it.`,
         triggers: triggers.map((trigger) => trigger.name),
       };
     }

@@ -28,7 +28,6 @@ import {
 } from "@/app/actions";
 import { CaseActionForm } from "@/components/case/CaseActionForm";
 import { EvidenceIntake } from "@/components/case/EvidenceIntake";
-import { FilingBriefPanel } from "@/components/case/FilingBriefPanel";
 import { WorkflowRail } from "@/components/case/WorkflowRail";
 import { ActionButton } from "@/components/ui/ActionFeedback";
 import { DeficiencyStatusBadge, EvcReportBadge, SlaBadge, StatusBadge } from "@/components/ui/Badges";
@@ -41,7 +40,6 @@ import { EVIDENCE_TYPE_LABELS } from "@/lib/evidence-types";
 import { checkConflict, EVC_ROSTER } from "@/lib/evc";
 import { canAcceptResubmission, canDecide, canRaiseDeficiency } from "@/lib/fsm";
 import { fmtDate, fmtDateTime, fmtNumber, isoDay, shortRef, truncateHash } from "@/lib/format";
-import { parseFilingBrief } from "@/lib/ai";
 import { getCase } from "@/lib/queries";
 import { getSession } from "@/lib/session";
 import { liveDaysInStage, slaForDays } from "@/lib/sla";
@@ -101,7 +99,6 @@ export default async function CasePage({
   const liveRules = evaluateAphRules(aphInputFor(app));
   const summary = aphSummary(liveRules);
   const flagged = liveRules.filter((rule) => rule.status !== "PASSED");
-  const brief = app.filingBrief ? parseFilingBrief(app.filingBrief.payload) : null;
   const openNotice = app.deficiencies.find((ticket) => ticket.status === "OPEN");
   const pendingNotice = app.deficiencies.find((ticket) => ticket.status === "RESUBMITTED");
   const inspection = app.inspections[0];
@@ -125,7 +122,6 @@ export default async function CasePage({
   const eligibleInspectors = EVC_ROSTER.filter(
     (member) => checkConflict(member, app.institution).passed,
   );
-  const canRegenerateBrief = canRun || can(session.role, "FILE_APPLICATION");
   const deadline = isoDay(new Date(Date.now() + 30 * 86_400_000));
 
   const primaryAction = (() => {
@@ -386,16 +382,76 @@ export default async function CasePage({
                 <div className="p-4">{primaryAction}</div>
               </div>
 
-              {brief && (
-                <FilingBriefPanel
-                  applicationId={app.id}
-                  payload={brief}
-                  engine="GROUNDED"
-                  model={null}
-                  generatedAt={app.filingBrief?.generatedAt ?? app.updatedAt}
-                  canRegenerate={canRegenerateBrief}
-                />
-              )}
+              <section className="panel">
+                <div className="panel-header">
+                  <div>
+                    <div className="eyebrow">The case file</div>
+                    <h2 className="panel-title mt-0.5">What is on record</h2>
+                  </div>
+                  <span className="font-mono text-xs text-slate-500">{shortRef(app.referenceNo)}</span>
+                </div>
+                <dl className="divide-y divide-slate-100">
+                  {[
+                    {
+                      label: "Statutory documents registered",
+                      value: `${app.institution.documents.length} of 4`,
+                      href: "/documents",
+                      linkLabel: "Register",
+                    },
+                    {
+                      label: "PDFs uploaded to this case",
+                      value: `${app.evidenceFiles.length}`,
+                      href: `/applications/${app.id}?tab=documents`,
+                      linkLabel: "Open",
+                    },
+                    {
+                      label: "Open deficiency notices",
+                      value: `${app.deficiencies.filter((ticket) => ticket.status === "OPEN").length}`,
+                      href: `/applications/${app.id}?tab=overview`,
+                      linkLabel: null,
+                    },
+                    {
+                      label: "Escalations raised",
+                      value: `${app.escalations.length}`,
+                      href: null,
+                      linkLabel: null,
+                    },
+                    {
+                      label: "Days in this stage",
+                      value: `${days}`,
+                      href: null,
+                      linkLabel: null,
+                    },
+                  ].map((row) => (
+                    <div key={row.label} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <dt className="text-sm text-slate-600">{row.label}</dt>
+                      <dd className="flex items-center gap-2 text-sm font-semibold text-navy-950">
+                        {row.value}
+                        {row.href && row.linkLabel && (
+                          <Link
+                            href={row.href}
+                            className="text-xs font-semibold text-navy-800 underline decoration-slate-300 underline-offset-2 hover:decoration-navy-700"
+                          >
+                            {row.linkLabel}
+                          </Link>
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                {app.auditLogs[0] && (
+                  <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-2.5 text-xs leading-relaxed text-slate-600">
+                    Last recorded action: {auditActionLabel(app.auditLogs[0].action)} ·{" "}
+                    {fmtDateTime(app.auditLogs[0].timestamp)} by {app.auditLogs[0].performedBy}.{" "}
+                    <Link
+                      href={`/applications/${app.id}?tab=history`}
+                      className="font-semibold text-navy-800 underline decoration-slate-300 underline-offset-2 hover:decoration-navy-700"
+                    >
+                      Full history
+                    </Link>
+                  </div>
+                )}
+              </section>
 
               {app.deficiencies.length > 0 && (
                 <section className="panel overflow-hidden">
@@ -673,9 +729,8 @@ export default async function CasePage({
               })}
             </div>
             <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3 text-xs leading-relaxed text-slate-600">
-              These results are computed from the filed declaration every time the page loads. There
-              is no external model: the same numbers always produce the same result, which is why the
-              output can be used in a formal notice.
+              These results come from the numbers the college declared. The same numbers always
+              produce the same result, so the officer, the college and the notice all see one truth.
             </div>
           </section>
 
