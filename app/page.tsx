@@ -117,7 +117,7 @@ export default async function DashboardPage() {
 
   const active = activeApps(apps);
   const rules = ruleStats(apps);
-  const deadlines = slaRows(apps);
+  const deadlines = slaRows(active);
   const breached = deadlines.filter((row) => row.sla === "BREACHED").length;
   const warning = deadlines.filter((row) => row.sla === "WARNING").length;
   const priority = deadlines.slice(0, 5);
